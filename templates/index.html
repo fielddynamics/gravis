@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRAVIS: Galactic Rotation from Field Dynamics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/gravis.css') }}">
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <nav class="nav-bar">
+        <div class="nav-logo" onclick="navigateToScreen('analysis')">GRAVIS</div>
+        <div class="nav-items">
+            <div class="nav-item active" data-screen="analysis" onclick="navigateToScreen('analysis')">Analysis</div>
+            <div class="nav-item" data-screen="about" onclick="navigateToScreen('about')">About</div>
+        </div>
+    </nav>
+
+    <!-- Screen Container -->
+    <div class="screen-container">
+        <!-- Analysis Screen -->
+        <div class="screen active" id="screen-analysis">
+            <div class="left-panel" id="left-panel">
+                <!-- Mode Toggle -->
+                <div class="mode-toggle">
+                    <div class="mode-toggle-label">Analysis Mode</div>
+                    <div class="mode-buttons">
+                        <button class="mode-button active" id="mode-prediction" onclick="setMode('prediction')">
+                            Prediction (M&#x2192;v)
+                        </button>
+                        <button class="mode-button" id="mode-inference" onclick="setMode('inference')">
+                            Inference (v&#x2192;M)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Examples Section (always expanded) -->
+                <div class="examples-section">
+                    <div class="examples-header" style="cursor: default;">
+                        <span class="examples-header-text">Load Example</span>
+                    </div>
+                    <div class="examples-content expanded" id="examples-content">
+                        <div class="examples-dropdown-wrapper">
+                            <select class="examples-dropdown" id="examples-dropdown" onchange="loadExample()">
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-label">
+                        <span>Distance Scale (r)</span>
+                        <span class="control-value" id="distance-value">10 kpc</span>
+                    </div>
+                    <input type="range" id="distance-slider" min="0.1" max="100" step="0.1" value="10">
+                </div>
+
+                <div class="control-group" id="mass-slider-group" style="display: none;">
+                    <div class="control-label">
+                        <span id="mass-label">Mass (M)</span>
+                        <span class="control-value" id="mass-value">10&#x00B9;&#x00B9; M&#x2609;</span>
+                    </div>
+                    <input type="range" id="mass-slider" min="8" max="13" step="0.1" value="11">
+                </div>
+
+                <!-- Mass Distribution Panel (always visible in prediction mode) -->
+                <div class="mass-model-section" id="mass-model-section">
+                    <div class="mass-model-header" style="cursor: default;">
+                        <span class="mass-model-header-text">Mass Distribution</span>
+                    </div>
+                    <div class="mass-model-content expanded" id="mass-model-content">
+                        <div class="mass-model-body">
+                            <!-- Stellar Bulge -->
+                            <div class="mass-component bulge">
+                                <div class="mass-component-title">Stellar Bulge (Hernquist)</div>
+                                <div class="control-label">
+                                    <span>Mass</span>
+                                    <span class="control-value" id="bulge-mass-value">1.5e10 M_sun</span>
+                                </div>
+                                <input type="range" id="bulge-mass-slider" min="7" max="11.5" step="0.01" value="10.176">
+                                <div class="control-label">
+                                    <span>Scale radius (a)</span>
+                                    <span class="control-value" id="bulge-scale-value">0.6 kpc</span>
+                                </div>
+                                <input type="range" id="bulge-scale-slider" min="0.1" max="3.0" step="0.1" value="0.6">
+                            </div>
+                            <!-- Stellar Disk -->
+                            <div class="mass-component disk">
+                                <div class="mass-component-title">Stellar Disk (Exponential)</div>
+                                <div class="control-label">
+                                    <span>Mass</span>
+                                    <span class="control-value" id="disk-mass-value">5.0e10 M_sun</span>
+                                </div>
+                                <input type="range" id="disk-mass-slider" min="7" max="12" step="0.01" value="10.699">
+                                <div class="control-label">
+                                    <span>Scale length (R_d)</span>
+                                    <span class="control-value" id="disk-scale-value">2.5 kpc</span>
+                                </div>
+                                <input type="range" id="disk-scale-slider" min="0.5" max="10" step="0.1" value="2.5">
+                            </div>
+                            <!-- Gas Disk -->
+                            <div class="mass-component gas">
+                                <div class="mass-component-title">Gas Disk (HI + H2 + He)</div>
+                                <div class="control-label">
+                                    <span>Mass</span>
+                                    <span class="control-value" id="gas-mass-value">1.0e10 M_sun</span>
+                                </div>
+                                <input type="range" id="gas-mass-slider" min="7" max="11.5" step="0.01" value="10">
+                                <div class="control-label">
+                                    <span>Scale length (R_d)</span>
+                                    <span class="control-value" id="gas-scale-value">5.0 kpc</span>
+                                </div>
+                                <input type="range" id="gas-scale-slider" min="1" max="25" step="0.5" value="5">
+                            </div>
+                            <!-- Total -->
+                            <div class="mass-model-total-row">
+                                <span>Total Baryonic Mass</span>
+                                <span class="control-value" id="mass-model-total-value">7.5e10 M_sun</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-group" id="velocity-control" style="display: none;">
+                    <div class="control-label">
+                        <span>Observed Velocity (v)</span>
+                        <span class="control-value" id="velocity-value">200 km/s</span>
+                    </div>
+                    <input type="range" id="velocity-slider" min="50" max="400" step="1" value="200">
+                </div>
+
+                <div class="control-group">
+                    <div class="control-label">
+                        <span>Acceleration Regime</span>
+                        <span class="control-value" id="accel-value">a/a&#x2080; = 1.0</span>
+                    </div>
+                    <input type="range" id="accel-slider" min="0.01" max="100" step="0.01" value="1">
+                </div>
+
+                <div class="inference-result" id="inference-result">
+                    <strong>Inferred Total Mass (DTG):</strong> <span id="inferred-mass-value"></span>
+                    <br><br>
+                    <strong>BTFR Mass (v&#x2074;/Ga&#x2080;):</strong> <span id="btfr-mass-value"></span>
+                    <br>
+                    <span style="font-size: 0.8em; color: #808080;">
+                        Baryonic Tully-Fisher: model-independent estimate from flat velocity
+                    </span>
+                </div>
+
+                <div id="observed-legend" style="display: none;"></div>
+            </div>
+
+            <div class="resize-handle" id="resize-handle"></div>
+
+            <div class="right-panel">
+                <div class="chart-container">
+                    <canvas id="gravityChart"></canvas>
+                    <button id="reset-zoom-btn" class="reset-zoom-button" style="display: none;">
+                        &#x1F504; Reset Zoom
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- End Analysis Screen -->
+
+        <!-- About Screen -->
+        <div class="screen" id="screen-about">
+            <div class="about-screen">
+                <div class="about-hero">
+                    <h1 class="about-title">GRAVIS</h1>
+                    <p class="about-subtitle">Galactic Rotation from Field Dynamics</p>
+                    <p class="about-version">v1.0</p>
+                </div>
+
+                <div class="about-content">
+                    <div class="about-card">
+                        <h2>Overview</h2>
+                        <p>GRAVIS is a zero-parameter galactic rotation curve prediction tool implementing the dual tetrad gravity (DTG) covariant completion. For a given galaxy, the tool accepts independently measured baryonic mass components (stellar bulge, stellar disk, gas disk) and solves the AQUAL field equation with the topologically derived constitutive law &mu;(x)&nbsp;=&nbsp;x/(1+x) to compute the predicted circular velocity profile. No dark matter halo is assumed, no free parameters are fitted to kinematic data, and all gravitational dynamics derive from the baryonic mass distribution and the topological coupling constant k&nbsp;=&nbsp;4.</p>
+                    </div>
+
+                    <div class="about-card">
+                        <h2>Capabilities</h2>
+                        <ul class="about-features">
+                            <li><strong>Forward Prediction</strong> &mdash; Compute rotation curves from baryonic mass (M&nbsp;&rarr;&nbsp;v)</li>
+                            <li><strong>Inverse Inference</strong> &mdash; Infer baryonic mass from observed velocities (v&nbsp;&rarr;&nbsp;M)</li>
+                            <li><strong>Three-Theory Comparison</strong> &mdash; Newtonian, DTG, and classical MOND on a single plot</li>
+                            <li><strong>Observational Overlay</strong> &mdash; Kinematic data with error bars for direct validation</li>
+                            <li><strong>Six Galaxies</strong> &mdash; Milky Way, Andromeda, NGC 3198, NGC 2403, M33, NGC 6503</li>
+                            <li><strong>REST API</strong> &mdash; Programmatic access to all computations</li>
+                            <li><strong>151 Unit Tests</strong> &mdash; Full test coverage of physics engine and API</li>
+                        </ul>
+                    </div>
+
+                    <div class="about-card">
+                        <h2>Source Code</h2>
+                        <p class="about-repo-url"><a href="https://github.com/fielddynamics/gravis" target="_blank" rel="noopener noreferrer">github.com/fielddynamics/gravis</a></p>
+                    </div>
+
+                    <div class="about-card">
+                        <h2>Citation</h2>
+                        <div class="about-citation">
+                            <p><strong>Software:</strong><br>
+                            Nelson, S. (2026). GRAVIS: Galactic Rotation from Field Dynamics.<br>
+                            <a href="https://github.com/fielddynamics/gravis" target="_blank" rel="noopener noreferrer">https://github.com/fielddynamics/gravis</a></p>
+                            <p><strong>Theory:</strong><br>
+                            Nelson, S. (2026). "Dual Tetrad Topology and the Field Origin: From Nuclear Decay to Galactic Dynamics."</p>
+                        </div>
+                    </div>
+
+                    <div class="about-footer">
+                        <p>Stephen Nelson &middot; Independent Researcher &middot; ORCID 0009-0008-6190-3269</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- End Screen Container -->
+
+    <script src="{{ url_for('static', filename='js/gravis.js') }}"></script>
+</body>
+</html>
