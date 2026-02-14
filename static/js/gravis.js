@@ -630,6 +630,9 @@ function loadExample() {
 // =====================================================================
 
 function setMode(mode) {
+    // Remember the current galaxy id before switching
+    var previousId = currentExample ? currentExample.id : null;
+
     currentMode = mode;
     currentExample = null;
 
@@ -659,6 +662,26 @@ function setMode(mode) {
     }
 
     updateExamplesDropdown();
+
+    // If a galaxy was loaded, find the same galaxy in the new mode and load it
+    if (previousId) {
+        // Normalize id: strip _inference suffix and handle mw -> milky_way
+        var baseId = previousId.replace(/_inference$/, '');
+        if (baseId === 'mw') baseId = 'milky_way';
+        var galaxies = galaxyCatalog[currentMode] || [];
+        var matchIndex = galaxies.findIndex(function(g) {
+            var gBase = g.id.replace(/_inference$/, '');
+            if (gBase === 'mw') gBase = 'milky_way';
+            return gBase === baseId;
+        });
+        if (matchIndex >= 0) {
+            var dropdown = document.getElementById('examples-dropdown');
+            dropdown.value = String(matchIndex + 1);
+            loadExample();
+            return;
+        }
+    }
+
     updateDisplays();
     updateChart();
 }
