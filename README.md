@@ -1,6 +1,8 @@
 # GRAVIS: Galactic Rotation from Field Dynamics
 
-A zero-parameter rotation curve prediction tool based on **Dual Tetrad Gravity** (DTG).
+A zero-parameter rotation curve prediction tool using **Gravity Field Dynamics**, implementing the **Dual Tetrad Gravity** (DTG) covariant completion.
+
+Author: Stephen Nelson | Source: [github.com/fielddynamics/gravis](https://github.com/fielddynamics/gravis)
 
 Supplemental tool for: Nelson, S. (2026). *Dual Tetrad Topology and the Field Origin: From Nuclear Decay to Galactic Dynamics*.
 
@@ -135,12 +137,18 @@ The test suite validates physical constants against CODATA/IAU values, checks so
 If you use GRAVIS in your research, please cite:
 
 ```bibtex
+@software{nelson2026gravis,
+  author  = {Nelson, Stephen},
+  title   = {GRAVIS: Galactic Rotation from Field Dynamics},
+  year    = {2026},
+  url     = {https://github.com/fielddynamics/gravis}
+}
+
 @article{nelson2026dtg,
   author  = {Nelson, Stephen},
-  title   = {Dual Tetrad Gravity and the Field Origin:
+  title   = {Dual Tetrad Topology and the Field Origin:
              From Nuclear Decay to Galactic Dynamics},
-  year    = {2026},
-  note    = {Paper VII}
+  year    = {2026}
 }
 ```
 
