@@ -25,6 +25,11 @@ def create_app():
     from api.routes import api
     app.register_blueprint(api)
 
+    # Lightweight splash screen (loads instantly, no external scripts)
+    @app.route("/splash")
+    def splash():
+        return render_template("splash.html")
+
     # Serve the main page
     @app.route("/")
     def index():

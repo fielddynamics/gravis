@@ -2257,6 +2257,18 @@ async function init() {
     // Handle URL hash
     const hash = window.location.hash.substring(1) || 'analysis';
     navigateToScreen(hash);
+
+    // Dismiss splash overlay: wait at least 3s from page load so the
+    // splash feels intentional, then fade out.
+    var splash = document.getElementById('splash-overlay');
+    if (splash) {
+        var elapsed = performance.now();
+        var remaining = Math.max(0, 3000 - elapsed);
+        setTimeout(function() {
+            splash.style.opacity = '0';
+            setTimeout(function() { splash.remove(); }, 500);
+        }, remaining);
+    }
 }
 
 // =====================================================================

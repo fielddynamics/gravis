@@ -4,12 +4,53 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GRAVIS: Galactic Rotation from Field Dynamics</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/gravis.css') }}">
 </head>
 <body>
+    <!-- Splash overlay: renders instantly before deferred scripts load -->
+    <div id="splash-overlay" style="
+        position: fixed; inset: 0; z-index: 9999;
+        background: #000000;
+        display: flex; flex-direction: column;
+        justify-content: center; align-items: center;
+        transition: opacity 0.5s ease-out;
+    ">
+        <style>
+            @keyframes splashBounce {
+                0%   { left: 0; }
+                50%  { left: calc(100% - 60px); }
+                100% { left: 0; }
+            }
+        </style>
+        <div style="display: flex; flex-direction: column; align-items: stretch;">
+            <div style="
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                font-size: 4.5em; font-weight: 700;
+                color: #4da6ff; letter-spacing: 12px;
+                user-select: none; text-align: center;
+            ">GRAVIS</div>
+            <div style="
+                width: 100%; height: 3px;
+                background: #1a1a1a;
+                border-radius: 2px;
+                margin-top: 32px;
+                position: relative;
+                overflow: hidden;
+            ">
+                <div style="
+                    position: absolute; top: 0;
+                    width: 60px; height: 100%;
+                    background: #4da6ff;
+                    border-radius: 2px;
+                    animation: splashBounce 1.4s ease-in-out infinite;
+                "></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Top Navigation Bar -->
     <nav class="nav-bar">
         <div class="nav-logo" onclick="navigateToScreen('analysis')">GRAVIS</div>
@@ -418,6 +459,6 @@
     </div>
     <!-- End Screen Container -->
 
-    <script src="{{ url_for('static', filename='js/gravis.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/gravis.js') }}"></script>
 </body>
 </html>
