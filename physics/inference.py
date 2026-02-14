@@ -2,19 +2,27 @@
 Mass inference: inverse problem solver.
 
 Given observed velocity v at radius r, infer the enclosed baryonic mass
-using the DTG field equation (AQUAL formulation).
+by evaluating the covariant field equation in the inverse direction.
+
+Forward (prediction):  M -> g_N -> solve field equation for x -> g = a0*x -> v
+Inverse (inference):   v -> g = v^2/r -> x = g/a0 -> evaluate y_N = x^2/(1+x) -> g_N -> M
+
+The field equation from the Lagrangian F(y) = y/2 - sqrt(y) + ln(1+sqrt(y))
+reduces in spherical symmetry to:  x^2 / (1 + x) = g_N / a0
+
+Forward requires solving a quadratic (given g_N, find x).
+Inverse just evaluates the left side (given x, compute g_N).  No solver needed.
 """
 
 from physics.constants import G, M_SUN, KPC_TO_M, A0
-from physics.aqual import mu
 
 
 def infer_mass(r_kpc, v_km_s, accel_ratio=1.0):
     """
     Infer enclosed baryonic mass from observed rotation velocity.
 
-    Uses the DTG field equation in reverse:
-      v^2/r = g_eff  =>  x = g_eff/a0  =>  g_N = a0 * mu(x) * x  =>  M = g_N * r^2 / G
+    Evaluates the covariant field equation in the inverse direction:
+      v^2/r = g  =>  x = g/a0  =>  g_N = a0 * x^2/(1+x)  =>  M = g_N * r^2 / G
 
     Parameters
     ----------
@@ -36,19 +44,18 @@ def infer_mass(r_kpc, v_km_s, accel_ratio=1.0):
     if r <= 0 or v <= 0:
         return 0.0
 
-    # From v^2 = g_eff * r => g_eff = v^2 / r
+    # From circular orbit: v^2 = g * r  =>  g = v^2 / r
     g_eff = (v * v) / r
 
     a0_eff = A0 * accel_ratio
 
-    # x = g_eff / a0
+    # Dimensionless field strength: x = g / a0
     x = g_eff / a0_eff
 
-    # From field equation: mu(x) * x * a0 = g_N
-    mu_x = mu(x)
-    gN = a0_eff * mu_x * x
+    # Field equation evaluated inversely: g_N / a0 = x^2 / (1 + x)
+    gN = a0_eff * x * x / (1.0 + x)
 
-    # From g_N = G*M/r^2 => M = g_N * r^2 / G
+    # From g_N = G*M/r^2  =>  M = g_N * r^2 / G
     M = (gN * r * r) / G
 
     return M / M_SUN

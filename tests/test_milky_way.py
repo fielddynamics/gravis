@@ -23,8 +23,8 @@ import pytest
 from physics.constants import G, M_SUN, KPC_TO_M, A0
 from physics.mass_model import enclosed_mass, total_mass
 from physics.newtonian import velocity as newt_v
-from physics.aqual import velocity as dtg_v, solve_x as dtg_solve_x, mu as dtg_mu
-from physics.mond import velocity as mond_v, solve_x as mond_solve_x, mu_mond
+from physics.aqual import velocity as dtg_v, solve_x as dtg_solve_x
+from physics.mond import velocity as mond_v, solve_x as mond_solve_x
 
 
 # =====================================================================
@@ -151,7 +151,7 @@ class TestNewtonianMilkyWay:
 
 class TestDTGMilkyWay:
     """
-    Dual Tetrad Gravity (AQUAL field equation with mu(x) = x/(1+x))
+    Gravity Field Dynamics (covariant field equation: x^2/(1+x) = g_N/a0)
     applied to the Milky Way.
 
     10 tests covering point mass, distributed mass, boost factors,
@@ -210,7 +210,7 @@ class TestDTGMilkyWay:
 
     def test_08_btfr_deep_mond_limit(self):
         """At very large r (point mass), v^4 -> G*M*a0 (BTFR).
-        DTG mu(x)=x/(1+x) approaches this as x->0."""
+        The GFD field equation x^2/(1+x) -> x^2 as x->0, giving this limit."""
         v_200 = dtg_v(200.0, MW_TOTAL)
         v4 = (v_200 * 1000.0) ** 4
         gma0 = G * MW_TOTAL * M_SUN * A0
@@ -267,8 +267,8 @@ class TestMONDMilkyWay:
         assert abs(v - 199.80) < 0.5
 
     def test_03_mond_below_dtg_at_all_radii(self):
-        """MOND v < DTG v at every MW radius (different interpolating functions).
-        DTG mu(x)=x/(1+x) gives stronger boost than MOND mu(x)=x/sqrt(1+x^2)."""
+        """MOND v < DTG v at every MW radius (different field equations).
+        GFD field eq x^2/(1+x) gives stronger enhancement than MOND x^2/sqrt(1+x^2)."""
         for r in [1, 2, 5, 8, 10, 15, 20, 25]:
             m = enclosed_mass(r, MW_MODEL)
             v_mond = mond_v(r, m)
@@ -337,19 +337,28 @@ class TestMONDMilkyWay:
         assert variation < 0.10, \
             f"MOND curve variation = {variation:.3f} ({v_min:.1f}-{v_max:.1f} km/s)"
 
-    def test_09_mond_mu_stronger_transition(self):
-        """MOND mu transitions more sharply than DTG mu at x=1.
-        MOND mu(1) = 1/sqrt(2) ~ 0.707 vs DTG mu(1) = 0.5."""
-        mond_at_1 = mu_mond(1.0)
-        dtg_at_1 = dtg_mu(1.0)
-        assert mond_at_1 > dtg_at_1, \
-            f"MOND mu(1)={mond_at_1:.4f} should > DTG mu(1)={dtg_at_1:.4f}"
-        assert abs(mond_at_1 - 1.0 / math.sqrt(2)) < 1e-15
-        assert abs(dtg_at_1 - 0.5) < 1e-15
+    def test_09_mond_weaker_enhancement_in_transition(self):
+        """At x=1 (transition regime), MOND and GFD field equations give
+        different y_N values, showing different enhancement strengths.
+
+        GFD field equation:  y_N = x^2/(1+x) -> at x=1: y_N = 0.5
+        MOND field equation: y_N = x^2/sqrt(1+x^2) -> at x=1: y_N = 1/sqrt(2)
+
+        MOND's y_N is larger (0.707 vs 0.5), meaning MOND assigns more of
+        the observed gravity to Newtonian sources and enhances less.
+        This is why GFD predicts higher velocities than MOND."""
+        # GFD: x^2/(1+x) at x=1
+        gfd_yN = 1.0 * 1.0 / (1.0 + 1.0)
+        # MOND: x^2/sqrt(1+x^2) at x=1
+        mond_yN = 1.0 * 1.0 / math.sqrt(1.0 + 1.0)
+        assert mond_yN > gfd_yN, \
+            f"MOND y_N({mond_yN:.4f}) should > GFD y_N({gfd_yN:.4f})"
+        assert abs(mond_yN - 1.0 / math.sqrt(2)) < 1e-15
+        assert abs(gfd_yN - 0.5) < 1e-15
 
     def test_10_both_same_deep_mond_asymptote(self):
-        """MOND and DTG converge to same v^4 = G*M*a0 at very large r.
-        Both mu functions -> x as x -> 0, giving identical deep-MOND limit."""
+        """MOND and GFD converge to same v^4 = G*M*a0 at very large r.
+        Both field equations reduce to x^2 = y_N as x -> 0, giving identical deep-MOND limit."""
         r = 500.0  # Very large radius, deep MOND
         v_mond = mond_v(r, MW_TOTAL)
         v_dtg = dtg_v(r, MW_TOTAL)

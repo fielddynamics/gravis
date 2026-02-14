@@ -1,30 +1,44 @@
 """
-Dual Tetrad Gravity (DTG) -- AQUAL field equation solver.
+Gravity Field Dynamics -- covariant field equation solver.
 
-Constitutive law: mu(x) = x / (1 + x)
-Field equation:   mu(g/a0) * g = g_N
-Analytic solution: x = (y_N + sqrt(y_N^2 + 4*y_N)) / 2, where y_N = g_N/a0
+Scalar Lagrangian:  F(y) = y/2 - sqrt(y) + ln(1 + sqrt(y))
+  where y = |grad Phi|^2 / a0^2
 
-This is the covariant scalar-tensor completion of Dual Tetrad Gravity.
-The interpolating function mu(x) = x/(1+x) is NOT empirical -- it is
-derived from the topological structure of the tetrad field.
+The Euler-Lagrange equation from this Lagrangian, in spherical symmetry,
+reduces to the algebraic field equation:
+
+    x^2 / (1 + x) = g_N / a0
+
+where x = g/a0 is the dimensionless gravitational field strength and
+g_N = GM/r^2 is the Newtonian acceleration.
+
+Analytic solution (quadratic in x):
+    x = (y_N + sqrt(y_N^2 + 4*y_N)) / 2,   y_N = g_N / a0
+
+The Lagrangian F(y) is uniquely determined by the coupling polynomial
+f(k) = 1 + k + k^2 of the stellated octahedron (dual tetrad topology).
+Its three terms map to the three structural levels: k^2 = 16 (quadratic),
+k = 4 (square root), k^0 = 1 (logarithm / Field Origin).
+
+Nothing here is empirical.  The Lagrangian, the field equation, and the
+acceleration scale a0 are all derived from the topology.
 """
 
 import math
 from physics.constants import G, M_SUN, KPC_TO_M, A0
 
 
-def mu(x):
-    """Constitutive law: mu(x) = x / (1 + x)."""
-    return x / (1.0 + x)
-
-
 def solve_x(gN_over_a0):
     """
-    Solve the AQUAL field equation mu(x)*x = y_N for x.
+    Solve the covariant field equation for the true gravitational field.
 
-    With mu(x) = x/(1+x), the equation x^2/(1+x) = y_N has the
-    analytic solution: x = (y_N + sqrt(y_N^2 + 4*y_N)) / 2.
+    Given the Newtonian acceleration ratio y_N = g_N / a0, solve:
+
+        x^2 / (1 + x) = y_N
+
+    This is a quadratic: x^2 - y_N*x - y_N = 0, with the physical root:
+
+        x = (y_N + sqrt(y_N^2 + 4*y_N)) / 2
 
     Parameters
     ----------
@@ -44,7 +58,14 @@ def solve_x(gN_over_a0):
 
 def velocity(r_kpc, m_solar, accel_ratio=1.0):
     """
-    DTG circular velocity at radius r_kpc for enclosed mass m_solar.
+    GFD circular velocity at radius r_kpc for enclosed mass m_solar.
+
+    Computation chain (forward problem):
+      1. g_N = G*M / r^2            (Newtonian acceleration)
+      2. y_N = g_N / a0             (dimensionless)
+      3. Solve x^2/(1+x) = y_N     (field equation from the Lagrangian)
+      4. g = a0 * x                 (true gravitational acceleration)
+      5. v = sqrt(g * r)            (circular orbit)
 
     Parameters
     ----------

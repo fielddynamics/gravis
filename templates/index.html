@@ -15,6 +15,7 @@
         <div class="nav-logo" onclick="navigateToScreen('analysis')">GRAVIS</div>
         <div class="nav-items">
             <div class="nav-item active" data-screen="analysis" onclick="navigateToScreen('analysis')">Analysis</div>
+            <div class="nav-item" data-screen="faq" onclick="navigateToScreen('faq')">FAQ</div>
             <div class="nav-item" data-screen="about" onclick="navigateToScreen('about')">About</div>
         </div>
     </nav>
@@ -241,6 +242,29 @@
             </div>
         </div>
         <!-- End Analysis Screen -->
+
+        <!-- FAQ Screen -->
+        <div class="screen" id="screen-faq">
+            <div class="faq-screen">
+                <div class="faq-header">
+                    <h1 class="faq-title">Frequently Asked Questions</h1>
+                    <p class="faq-subtitle">Search or browse questions about GRAVIS and Gravity Field Dynamics</p>
+                    <div class="faq-search-wrapper">
+                        <input type="text" id="faq-search" class="faq-search" placeholder="Search questions..." autocomplete="off">
+                        <span class="faq-search-icon">&#x1F50D;</span>
+                        <span class="faq-search-clear" id="faq-search-clear" style="display:none;">&#x2715;</span>
+                    </div>
+                    <div class="faq-controls">
+                        <button class="faq-expand-btn" id="faq-expand-all" onclick="toggleAllFaq(true)">Expand All</button>
+                        <button class="faq-expand-btn" id="faq-collapse-all" onclick="toggleAllFaq(false)">Collapse All</button>
+                        <span class="faq-result-count" id="faq-result-count"></span>
+                    </div>
+                </div>
+                <div class="faq-content" id="faq-content">
+                    <!-- FAQ items injected by JS -->
+                </div>
+            </div>
+        </div>
 
         <!-- About Screen -->
         <div class="screen" id="screen-about">

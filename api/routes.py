@@ -353,6 +353,12 @@ def infer_mass_multi_endpoint():
         total_lo = m_total_current * scale_lo
         delta_m = abs(total_hi - total_lo) / 2.0
 
+        # Compute GFD predicted velocity at this radius using the MODEL mass
+        # (not the inferred mass -- we compare observation to the prediction)
+        v_gfd = dtg_velocity(r_kpc, m_enclosed_current, accel_ratio)
+        delta_v = round(v_km_s - v_gfd, 2)
+        sigma_dev = round(abs(delta_v) / max(err, 0.1), 2) if err > 0 else None
+
         results.append({
             "r_kpc": r_kpc,
             "v_km_s": v_km_s,
@@ -360,6 +366,9 @@ def infer_mass_multi_endpoint():
             "inferred_total": round(inferred_total, 2),
             "log10_total": round(math.log10(max(inferred_total, 1.0)), 4),
             "enclosed_frac": round(enc_frac, 4),
+            "v_gfd": round(v_gfd, 2),
+            "delta_v": delta_v,
+            "sigma_dev": sigma_dev,
         })
         totals.append(inferred_total)
         weights.append(enc_frac)
@@ -438,6 +447,34 @@ def infer_mass_multi_endpoint():
     q3 = _percentile(sorted_totals, 0.75)
     band_iqr = (q3 - q1) / 2.0
 
+    # -----------------------------------------------------------------
+    # Shape diagnostic: inner vs outer half velocity residual summary
+    # Only include points with enclosed_frac >= 0.05 for reliability
+    # -----------------------------------------------------------------
+    diag_pts = [p for p in results
+                if p.get("enclosed_frac", 0) >= 0.05
+                and p.get("delta_v") is not None
+                and p.get("sigma_dev") is not None]
+    shape_diagnostic = None
+    if len(diag_pts) >= 4:
+        mid = len(diag_pts) // 2
+        inner = diag_pts[:mid]
+        outer = diag_pts[mid:]
+        shape_diagnostic = {
+            "inner_r_max": inner[-1]["r_kpc"],
+            "outer_r_min": outer[0]["r_kpc"],
+            "inner_mean_dv": round(
+                sum(p["delta_v"] for p in inner) / len(inner), 2),
+            "outer_mean_dv": round(
+                sum(p["delta_v"] for p in outer) / len(outer), 2),
+            "inner_mean_sigma": round(
+                sum(p["sigma_dev"] for p in inner) / len(inner), 2),
+            "outer_mean_sigma": round(
+                sum(p["sigma_dev"] for p in outer) / len(outer), 2),
+            "n_inner": len(inner),
+            "n_outer": len(outer),
+        }
+
     return jsonify({
         "points": results,
         "n_points": n,
@@ -456,6 +493,7 @@ def infer_mass_multi_endpoint():
             "obs_error": round(band_obs_err, 2),
             "iqr": round(band_iqr, 2),
         },
+        "shape_diagnostic": shape_diagnostic,
     })
 
 
