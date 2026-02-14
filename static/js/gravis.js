@@ -44,6 +44,8 @@ const DEBOUNCE_MS = 80;
 // DOM ELEMENTS
 // =====================================================================
 const distanceSlider = document.getElementById('distance-slider');
+const distanceLabel = document.getElementById('distance-label');
+const anchorRadiusInput = document.getElementById('anchor-radius');
 const massSlider = document.getElementById('mass-slider');
 const velocitySlider = document.getElementById('velocity-slider');
 const accelSlider = document.getElementById('accel-slider');
@@ -1125,8 +1127,9 @@ function renderMultiPointSidebar(result, modelTotal) {
     var agColor = agreementPct < 10 ? '#4caf50' : agreementPct < 30 ? '#ffa726' : '#ef5350';
     var agSign = wMean < modelTotal ? '-' : '+';
     html += '<div style="margin-bottom: 10px;">';
-    html += '<strong style="color:#e0e0e0;">Offset:</strong> ';
+    html += '<strong style="color:#e0e0e0;">Mass Offset:</strong> ';
     html += '<span style="color:' + agColor + ';">' + agSign + agreementPct.toFixed(1) + '%</span>';
+    html += ' <span style="color:#606060; font-size:0.85em;">(obs. mean vs GFD prediction)</span>';
     html += '</div>';
 
     // Per-point table
@@ -1134,31 +1137,180 @@ function renderMultiPointSidebar(result, modelTotal) {
     html += '<tr style="border-bottom:1px solid #404040; color:#808080;">';
     html += '<th style="text-align:left; padding:4px 6px;">r (kpc)</th>';
     html += '<th style="text-align:left; padding:4px 6px;">v (km/s)</th>';
-    html += '<th style="text-align:right; padding:4px 6px;">log10(M)</th>';
     html += '<th style="text-align:right; padding:4px 6px;">M enc.</th>';
-    html += '<th style="text-align:right; padding:4px 6px;">vs GFD</th>';
+    html += '<th style="text-align:right; padding:4px 6px;" title="Velocity residual: observed minus GFD prediction">\u0394v</th>';
+    html += '<th style="text-align:right; padding:4px 6px;" title="Sigma deviation: |v_obs - v_GFD| / error">\u03C3</th>';
     html += '</tr>';
 
     for (var i = 0; i < result.points.length; i++) {
         var pt = result.points[i];
-        var deviation = ((pt.inferred_total - modelTotal) / modelTotal) * 100;
-        var devColor = Math.abs(deviation) < 10 ? '#4caf50' : Math.abs(deviation) < 25 ? '#ffa726' : '#ef5350';
         var errStr = pt.err ? ' \u00B1 ' + pt.err : '';
         var encPct = (pt.enclosed_frac * 100).toFixed(0);
         var rowOpacity = pt.enclosed_frac < 0.1 ? 'opacity: 0.5;' : '';
+        // Velocity residual: compare observed v to GFD prediction at this radius
+        var gfdV = interpolateGFDVelocity(pt.r_kpc);
+        var deltaV = gfdV !== null ? (pt.v_km_s - gfdV) : null;
+        var sigmaAway = (deltaV !== null && pt.err > 0) ? Math.abs(deltaV) / pt.err : null;
+        var dvColor = '#4caf50';
+        if (sigmaAway !== null) {
+            dvColor = sigmaAway < 1 ? '#4caf50' : sigmaAway < 2 ? '#ffa726' : '#ef5350';
+        }
+        var dvStr = deltaV !== null ? ((deltaV >= 0 ? '+' : '') + deltaV.toFixed(1)) : '\u2014';
+        var sigStr = sigmaAway !== null ? sigmaAway.toFixed(1) : '\u2014';
         html += '<tr style="border-bottom:1px solid #2a2a2a; ' + rowOpacity + '">';
         html += '<td style="padding:3px 6px; color:#e0e0e0;">' + pt.r_kpc + '</td>';
         html += '<td style="padding:3px 6px; color:#e0e0e0;">' + pt.v_km_s + errStr + '</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:#b0b0b0;">' + pt.log10_total.toFixed(2) + '</td>';
         html += '<td style="text-align:right; padding:3px 6px; color:#808080;">' + encPct + '%</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:' + devColor + ';">' + (deviation >= 0 ? '+' : '') + deviation.toFixed(1) + '%</td>';
+        html += '<td style="text-align:right; padding:3px 6px; color:' + dvColor + ';">' + dvStr + '</td>';
+        html += '<td style="text-align:right; padding:3px 6px; color:' + dvColor + ';">' + sigStr + '</td>';
         html += '</tr>';
     }
     html += '</table>';
 
     html += '<div style="margin-top: 8px; font-size: 0.8em; color: #606060;">';
-    html += 'M enc. = % of model mass within this radius. vs GFD = deviation from prediction.';
+    html += '\u0394v = v<sub>obs</sub> \u2212 v<sub>GFD</sub> (km/s). \u03C3 = |\u0394v| / error.';
     html += '</div>';
+
+    // ── Shape Diagnostic ──
+    // Split points into inner half and outer half, compute mean delta-v and sigma
+    var dvArr = [];
+    for (var i = 0; i < result.points.length; i++) {
+        var pt = result.points[i];
+        if (pt.enclosed_frac < 0.05) continue;  // skip unreliable innermost
+        var gfdV = interpolateGFDVelocity(pt.r_kpc);
+        if (gfdV === null) continue;
+        var dv = pt.v_km_s - gfdV;
+        var sig = (pt.err && pt.err > 0) ? Math.abs(dv) / pt.err : 0;
+        dvArr.push({ r: pt.r_kpc, dv: dv, sigma: sig });
+    }
+
+    if (dvArr.length >= 4) {
+        var mid = Math.floor(dvArr.length / 2);
+        var innerPts = dvArr.slice(0, mid);
+        var outerPts = dvArr.slice(mid);
+
+        var avgInnerDv = innerPts.reduce(function(s, p) { return s + p.dv; }, 0) / innerPts.length;
+        var avgOuterDv = outerPts.reduce(function(s, p) { return s + p.dv; }, 0) / outerPts.length;
+        var avgInnerSig = innerPts.reduce(function(s, p) { return s + p.sigma; }, 0) / innerPts.length;
+        var avgOuterSig = outerPts.reduce(function(s, p) { return s + p.sigma; }, 0) / outerPts.length;
+
+        var innerR = innerPts[innerPts.length - 1].r;
+        var outerR0 = outerPts[0].r;
+
+        var innerColor = avgInnerSig < 1 ? '#4caf50' : avgInnerSig < 2 ? '#ffa726' : '#ef5350';
+        var outerColor = avgOuterSig < 1 ? '#4caf50' : avgOuterSig < 2 ? '#ffa726' : '#ef5350';
+
+        html += '<div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #404040;">';
+        html += '<strong style="color: #e0e0e0;">Shape Diagnostic</strong>';
+        html += '<table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:0.85em;">';
+        html += '<tr style="border-bottom:1px solid #404040; color:#808080;">';
+        html += '<th style="text-align:left; padding:3px 6px;">Region</th>';
+        html += '<th style="text-align:right; padding:3px 6px;">Mean \u0394v</th>';
+        html += '<th style="text-align:right; padding:3px 6px;">Mean \u03C3</th>';
+        html += '</tr>';
+        html += '<tr style="border-bottom:1px solid #2a2a2a;">';
+        html += '<td style="padding:3px 6px; color:#b0b0b0;">Inner (r < ' + innerR.toFixed(1) + ')</td>';
+        html += '<td style="text-align:right; padding:3px 6px; color:' + innerColor + ';">' + (avgInnerDv >= 0 ? '+' : '') + avgInnerDv.toFixed(1) + '</td>';
+        html += '<td style="text-align:right; padding:3px 6px; color:' + innerColor + ';">' + avgInnerSig.toFixed(1) + '</td>';
+        html += '</tr>';
+        html += '<tr style="border-bottom:1px solid #2a2a2a;">';
+        html += '<td style="padding:3px 6px; color:#b0b0b0;">Outer (r > ' + outerR0.toFixed(1) + ')</td>';
+        html += '<td style="text-align:right; padding:3px 6px; color:' + outerColor + ';">' + (avgOuterDv >= 0 ? '+' : '') + avgOuterDv.toFixed(1) + '</td>';
+        html += '<td style="text-align:right; padding:3px 6px; color:' + outerColor + ';">' + avgOuterSig.toFixed(1) + '</td>';
+        html += '</tr>';
+        html += '</table>';
+
+        // Recommendation logic: sigma is the gatekeeper, not raw delta-v.
+        // If both regions have low sigma, the fit is good regardless of
+        // the raw km/s offset (which may just reflect measurement scatter).
+        var overallSig = (avgInnerSig + avgOuterSig) / 2;
+        var bothGood = avgInnerSig < 1.5 && avgOuterSig < 1.5;
+        var innerBad = avgInnerSig >= 2;
+        var outerBad = avgOuterSig >= 2;
+        var innerOver = avgInnerDv < 0;   // GFD overpredicts inner = negative dv
+        var outerOver = avgOuterDv < 0;
+        // Gradient only meaningful when at least one region has significant sigma
+        var hasShapeIssue = (innerBad || outerBad) && Math.abs(avgInnerSig - avgOuterSig) > 1.5;
+
+        if (bothGood) {
+            // Both regions within ~1.5 sigma -- excellent fit
+            html += '<div style="margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #4caf50; font-size: 0.85em;">';
+            html += '<div style="color: #4caf50;">';
+            html += '<strong>Excellent shape fit</strong> \u2014 all residuals within measurement error.';
+            html += '</div>';
+            html += '</div>';
+        } else if (hasShapeIssue) {
+            html += '<div style="margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #4da6ff; font-size: 0.85em;">';
+
+            if (innerBad && !outerBad && innerOver) {
+                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
+                html += '<strong>Mass too centrally concentrated</strong>';
+                html += '</div>';
+                html += '<div style="color: #b0b0b0;">';
+                html += 'Inner radii: mean ' + avgInnerSig.toFixed(1) + '\u03C3 deviation. ';
+                html += 'Try <strong style="color:#4da6ff;">increasing</strong> the Disk or Gas ';
+                html += '<strong style="color:#4da6ff;">Scale length</strong> to redistribute mass outward.';
+                html += '</div>';
+            } else if (innerBad && !outerBad && !innerOver) {
+                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
+                html += '<strong>Mass deficit at center</strong>';
+                html += '</div>';
+                html += '<div style="color: #b0b0b0;">';
+                html += 'Inner radii: mean ' + avgInnerSig.toFixed(1) + '\u03C3 deviation. ';
+                html += 'Try <strong style="color:#4da6ff;">decreasing</strong> the Disk or Gas ';
+                html += '<strong style="color:#4da6ff;">Scale length</strong>, ';
+                html += 'or increasing the Bulge <strong style="color:#4da6ff;">Scale radius</strong>.';
+                html += '</div>';
+            } else if (!innerBad && outerBad && outerOver) {
+                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
+                html += '<strong>Mass too radially extended</strong>';
+                html += '</div>';
+                html += '<div style="color: #b0b0b0;">';
+                html += 'Outer radii: mean ' + avgOuterSig.toFixed(1) + '\u03C3 deviation. ';
+                html += 'Try <strong style="color:#4da6ff;">decreasing</strong> the Disk or Gas ';
+                html += '<strong style="color:#4da6ff;">Scale length</strong> to concentrate mass inward.';
+                html += '</div>';
+            } else if (!innerBad && outerBad && !outerOver) {
+                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
+                html += '<strong>Mass deficit at outer radii</strong>';
+                html += '</div>';
+                html += '<div style="color: #b0b0b0;">';
+                html += 'Outer radii: mean ' + avgOuterSig.toFixed(1) + '\u03C3 deviation. ';
+                html += 'Try <strong style="color:#4da6ff;">increasing</strong> the Gas ';
+                html += '<strong style="color:#4da6ff;">Scale length</strong> to extend the mass distribution.';
+                html += '</div>';
+            } else {
+                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
+                html += '<strong>Shape mismatch</strong>';
+                html += '</div>';
+                html += '<div style="color: #b0b0b0;">';
+                html += 'Adjust the Disk and Gas <strong style="color:#4da6ff;">Scale length</strong> sliders to improve the inner/outer balance.';
+                html += '</div>';
+            }
+
+            html += '</div>';
+        } else if (innerBad && outerBad) {
+            // Both regions have high sigma -- systematic issue
+            html += '<div style="margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #ffa726; font-size: 0.85em;">';
+            html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
+            html += '<strong>Systematic ' + (innerOver ? 'overestimate' : 'underestimate') + '</strong>';
+            html += '</div>';
+            html += '<div style="color: #b0b0b0;">';
+            html += 'Mean deviation: ' + overallSig.toFixed(1) + '\u03C3 across all radii. ';
+            html += 'The overall normalization may need adjustment.';
+            html += '</div>';
+            html += '</div>';
+        } else {
+            // Moderate fit -- one region borderline
+            html += '<div style="margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #ffa726; font-size: 0.85em;">';
+            html += '<div style="color: #ffa726;">';
+            html += '<strong>Adequate fit</strong> \u2014 mean ' + overallSig.toFixed(1) + '\u03C3 deviation. Adjust the Scale length sliders to improve.';
+            html += '</div>';
+            html += '</div>';
+        }
+
+        html += '</div>';
+    }
 
     multiBody.innerHTML = html;
     multiDiv.style.display = 'block';
@@ -1199,9 +1351,15 @@ async function updateChart() {
     if (currentMode === 'inference') {
         // Inference mode: use mass distribution shape from sliders,
         // auto-scale component masses to match observation via DTG
-        const r_obs = parseFloat(distanceSlider.value);
+        const r_obs = parseFloat(anchorRadiusInput.value);
         const v_obs = parseFloat(velocitySlider.value);
         const shapeModel = getMassModelFromSliders();
+
+        // Update anchor display
+        var anchorDisplay = document.getElementById('anchor-display');
+        if (anchorDisplay) {
+            anchorDisplay.textContent = v_obs + ' km/s at ' + r_obs + ' kpc';
+        }
 
         try {
             // Call the distributed inference endpoint
@@ -1463,13 +1621,37 @@ function loadExample() {
     pinnedGalaxyLabel = galaxyLabel;
     pinnedGalaxyExample = example;
 
-    distanceSlider.value = example.distance;
     accelSlider.value = example.accel;
 
     if (currentMode === 'prediction') {
+        distanceSlider.value = example.distance;
+        anchorRadiusInput.value = example.distance;
         massSlider.value = example.mass || 11;
     } else {
+        // In inference mode: anchor radius = the observation point,
+        // distance slider = chart range (match prediction counterpart)
+        anchorRadiusInput.value = example.distance;
         velocitySlider.value = example.velocity || 200;
+
+        // Find the prediction counterpart's distance for the chart range
+        var predDistance = example.distance;
+        var baseId = example.id.replace(/_inference$/, '');
+        if (baseId === 'mw') baseId = 'milky_way';
+        var predictions = galaxyCatalog.prediction || [];
+        for (var i = 0; i < predictions.length; i++) {
+            if (predictions[i].id === baseId) {
+                predDistance = predictions[i].distance;
+                break;
+            }
+        }
+        // Use the larger of: prediction distance, or max obs radius + padding
+        var chartDist = predDistance;
+        var obsForRange = getPredictionObservations(example);
+        if (obsForRange && obsForRange.length > 0) {
+            var maxObsR = Math.max.apply(null, obsForRange.map(function(o) { return o.r; }));
+            chartDist = Math.max(chartDist, maxObsR * 1.15);
+        }
+        distanceSlider.value = chartDist;
     }
 
     // Set zoom limits based on observational data or distance
@@ -1523,6 +1705,9 @@ function setMode(mode) {
 
     document.getElementById('mode-prediction').classList.toggle('active', mode === 'prediction');
     document.getElementById('mode-inference').classList.toggle('active', mode === 'inference');
+
+    // Update distance label for context
+    distanceLabel.textContent = mode === 'inference' ? 'Chart Range (r)' : 'Distance Scale (r)';
 
     if (mode === 'prediction') {
         velocityControl.style.display = 'none';

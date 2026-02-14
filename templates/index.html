@@ -52,10 +52,11 @@
 
                 <div class="control-group">
                     <div class="control-label">
-                        <span>Distance Scale (r)</span>
+                        <span id="distance-label">Distance Scale (r)</span>
                         <span class="control-value" id="distance-value">10 kpc</span>
                     </div>
                     <input type="range" id="distance-slider" min="0.1" max="100" step="0.1" value="10">
+                    <input type="hidden" id="anchor-radius" value="10">
                 </div>
 
                 <div class="control-group" id="mass-slider-group" style="display: none;">
@@ -141,6 +142,9 @@
                 </div>
 
                 <div class="inference-result" id="inference-result">
+                    <div style="font-size: 0.8em; color: #808080; margin-bottom: 6px;">
+                        Anchor: <strong style="color: #b0b0b0;"><span id="anchor-display">v km/s at r kpc</span></strong>
+                    </div>
                     <strong>Inferred Total Mass (GFD):</strong> <span id="inferred-mass-value"></span>
                     <br><br>
                     <strong>BTFR Mass (v&#x2074;/Ga&#x2080;):</strong> <span id="btfr-mass-value"></span>
