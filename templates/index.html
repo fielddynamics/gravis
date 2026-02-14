@@ -149,12 +149,45 @@
                         Baryonic Tully-Fisher: model-independent estimate from flat velocity
                     </span>
                     <div id="multi-inference-result" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #404040;">
-                        <strong style="color: #4da6ff;">Multi-Point Consistency</strong>
-                        <div id="multi-inference-body" style="margin-top: 8px; font-size: 0.85em; color: #b0b0b0; line-height: 1.6;"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <strong style="color: #4da6ff;">Multi-Point Consistency</strong>
+                            <select id="band-method-select" title="Confidence band method" style="background: #1a1a1a; color: #b0b0b0; border: 1px solid #404040; border-radius: 4px; padding: 3px 6px; font-size: 0.8em; cursor: pointer;">
+                                <option value="weighted_rms" title="Spread of per-point inferences vs GFD prediction, weighted by enclosed fraction">Weighted RMS</option>
+                                <option value="weighted_scatter" title="Weighted standard deviation of per-point inferences around their mean">1&#x03C3; Scatter</option>
+                                <option value="obs_error" title="Propagated velocity measurement uncertainties through the field equation">Obs. Error</option>
+                                <option value="min_max" title="Full range of per-point inferred masses (most conservative)">Min-Max</option>
+                                <option value="iqr" title="Interquartile range, resistant to outlier inner points">IQR (Robust)</option>
+                            </select>
+                        </div>
+                        <div id="multi-inference-body" style="font-size: 0.85em; color: #b0b0b0; line-height: 1.6;"></div>
                     </div>
                 </div>
 
                 <div id="observed-legend" style="display: none;"></div>
+
+                <div id="cdm-halo-info" style="display: none; margin-top: 12px; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; font-size: 0.85em; line-height: 1.6;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <strong style="color: #ffffff;">&Lambda;CDM + NFW Halo</strong>
+                        <span style="font-size: 0.8em; color: #808080; font-style: italic;" id="cdm-fit-method"></span>
+                    </div>
+                    <div id="cdm-halo-details" style="color: #b0b0b0;"></div>
+                    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #333;">
+                        <table style="width: 100%; font-size: 0.9em;">
+                            <tr>
+                                <td style="color: #808080;">Theory</td>
+                                <td style="text-align: right; color: #808080;">Free Parameters</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #4da6ff;">Gravity Field Dynamics</td>
+                                <td style="text-align: right; color: #4caf50; font-weight: bold;">0</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #ffffff;">&Lambda;CDM + NFW</td>
+                                <td style="text-align: right; color: #ef5350; font-weight: bold;" id="cdm-param-count">2</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <div class="resize-handle" id="resize-handle"></div>

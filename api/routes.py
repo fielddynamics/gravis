@@ -20,6 +20,7 @@ from physics.newtonian import velocity as newtonian_velocity
 from physics.aqual import velocity as dtg_velocity
 from physics.mond import velocity as mond_velocity
 from physics.inference import infer_mass
+from physics.nfw import cdm_velocity, abundance_matching, fit_halo, concentration, r200_kpc
 from data.galaxies import get_all_galaxies, get_galaxy_by_id
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -43,7 +44,7 @@ def get_galaxy(galaxy_id):
 @api.route("/rotation-curve", methods=["POST"])
 def compute_rotation_curve():
     """
-    Compute Newtonian, DTG, and MOND rotation curves.
+    Compute Newtonian, DTG, MOND, and CDM rotation curves.
 
     Request JSON:
     {
@@ -54,7 +55,8 @@ def compute_rotation_curve():
             "bulge": {"M": 1.5e10, "a": 0.6},
             "disk":  {"M": 5.0e10, "Rd": 2.5},
             "gas":   {"M": 1.0e10, "Rd": 5.0}
-        }
+        },
+        "observations": [...]      // optional: for CDM halo fitting
     }
 
     Response JSON:
@@ -63,7 +65,9 @@ def compute_rotation_curve():
         "newtonian": [...],        // km/s
         "dtg": [...],              // km/s
         "mond": [...],             // km/s
-        "enclosed_mass": [...]     // M_sun at each radius
+        "cdm": [...],              // km/s (baryonic + best-fit NFW halo)
+        "enclosed_mass": [...],    // M_sun at each radius
+        "cdm_halo": {...}          // NFW fit details (M200, c, chi2, etc.)
     }
     """
     data = request.get_json()
@@ -74,6 +78,7 @@ def compute_rotation_curve():
     num_points = data.get("num_points", 100)
     accel_ratio = data.get("accel_ratio", 1.0)
     mass_model = data.get("mass_model")
+    observations = data.get("observations")
 
     if not mass_model:
         return jsonify({"error": "mass_model is required"}), 400
@@ -82,10 +87,47 @@ def compute_rotation_curve():
     num_points = min(int(num_points), 500)
     num_points = max(num_points, 10)
 
+    # ------------------------------------------------------------------
+    # Determine NFW halo mass: fit to observations or abundance matching
+    # ------------------------------------------------------------------
+    m_total = total_mass(mass_model)
+
+    def mass_at_r(r):
+        return enclosed_mass(r, mass_model)
+
+    cdm_halo_info = None
+    m200 = None
+
+    if observations and len(observations) >= 2:
+        # Best-fit NFW halo to observed rotation data
+        fit = fit_halo(observations, mass_at_r, accel_ratio)
+        if fit:
+            m200 = fit['m200']
+            cdm_halo_info = fit
+            cdm_halo_info['method'] = 'chi-squared fit to observations'
+    
+    if m200 is None:
+        # Fallback: abundance matching (Moster+ 2013)
+        m200 = abundance_matching(m_total)
+        c_val = concentration(m200)
+        r200 = r200_kpc(m200)
+        cdm_halo_info = {
+            'm200': m200,
+            'c': round(c_val, 2),
+            'r200_kpc': round(r200, 2),
+            'n_params_fitted': 0,
+            'n_params_total': 2,
+            'method': 'abundance matching (Moster+ 2013)',
+        }
+
+    # ------------------------------------------------------------------
+    # Compute curves at each radius
+    # ------------------------------------------------------------------
     radii = []
     newtonian = []
     dtg = []
     mond = []
+    cdm = []
     enc_mass = []
 
     for i in range(num_points):
@@ -97,13 +139,20 @@ def compute_rotation_curve():
         newtonian.append(round(newtonian_velocity(r, m_at_r), 4))
         dtg.append(round(dtg_velocity(r, m_at_r, accel_ratio), 4))
         mond.append(round(mond_velocity(r, m_at_r, accel_ratio), 4))
+        cdm.append(round(cdm_velocity(r, m_at_r, m200), 4))
+
+    # Format halo info for JSON
+    if cdm_halo_info:
+        cdm_halo_info['m200'] = round(cdm_halo_info['m200'], 2)
 
     return jsonify({
         "radii": radii,
         "newtonian": newtonian,
         "dtg": dtg,
         "mond": mond,
+        "cdm": cdm,
         "enclosed_mass": enc_mass,
+        "cdm_halo": cdm_halo_info,
     })
 
 
@@ -270,6 +319,8 @@ def infer_mass_multi_endpoint():
     if m_total_current <= 0:
         return jsonify({"error": "Mass model has zero total mass"}), 400
 
+    mass_errors = []  # per-point mass uncertainty from velocity error bars
+
     for obs in observations:
         r_kpc = obs.get("r", 0)
         v_km_s = obs.get("v", 0)
@@ -290,8 +341,17 @@ def infer_mass_multi_endpoint():
         inferred_total = m_total_current * scale
 
         # Enclosed fraction: how much of the model mass is within this radius
-        # Higher fractions = more reliable total mass estimate
         enc_frac = m_enclosed_current / m_total_current
+
+        # Propagated error: infer mass at v +/- err to get delta_M
+        sigma_err = max(err, 1.0)
+        m_hi = infer_mass(r_kpc, v_km_s + sigma_err, accel_ratio)
+        m_lo = infer_mass(r_kpc, max(v_km_s - sigma_err, 1.0), accel_ratio)
+        scale_hi = m_hi / m_enclosed_current
+        scale_lo = m_lo / m_enclosed_current
+        total_hi = m_total_current * scale_hi
+        total_lo = m_total_current * scale_lo
+        delta_m = abs(total_hi - total_lo) / 2.0
 
         results.append({
             "r_kpc": r_kpc,
@@ -303,6 +363,7 @@ def infer_mass_multi_endpoint():
         })
         totals.append(inferred_total)
         weights.append(enc_frac)
+        mass_errors.append(delta_m)
 
     if len(totals) < 2:
         return jsonify({"error": "Need at least 2 valid observation points"}), 400
@@ -316,12 +377,9 @@ def infer_mass_multi_endpoint():
     cv = (std_total / mean_total) * 100.0 if mean_total > 0 else 0.0
 
     # Weighted statistics (weight = enclosed mass fraction)
-    # Points where more of the galaxy's mass is enclosed are more
-    # reliable estimators of the total mass.
     w_sum = sum(weights)
     if w_sum > 0:
         w_mean = sum(t * w for t, w in zip(totals, weights)) / w_sum
-        # Weighted sample variance (reliability weights)
         w_sum2 = sum(w * w for w in weights)
         if w_sum * w_sum - w_sum2 > 0:
             w_var = (w_sum / (w_sum * w_sum - w_sum2)) * \
@@ -335,6 +393,51 @@ def infer_mass_multi_endpoint():
         w_std = std_total
         w_cv = cv
 
+    # -----------------------------------------------------------------
+    # Band methods: 5 different half-width calculations (in M_sun)
+    # Each represents a different statistical view of the uncertainty.
+    # The frontend applies these as +/- around the anchor mass.
+    # Note: the band is always centered on the GFD anchor (modelTotal),
+    # so half-widths must be computed relative to the anchor, not the
+    # data midpoint.
+    # -----------------------------------------------------------------
+    sorted_totals = sorted(totals)
+
+    # 1. Weighted RMS from anchor: captures scatter + systematic offset
+    #    Weight = enclosed fraction. The current default.
+    #    Not returned here -- computed on frontend since it needs modelTotal.
+
+    # 2. 1-sigma Weighted Scatter: pure spread of per-point estimates
+    band_scatter = w_std
+
+    # 3. Propagated Observational Error: formal error from velocity bars
+    #    Combine per-point mass errors weighted by enclosed fraction.
+    #    This computes the weighted RMS of per-point mass uncertainties,
+    #    giving the "typical" mass error from measurement noise alone.
+    if w_sum > 0 and mass_errors:
+        w_err_sq = sum(w * de * de for w, de in zip(weights, mass_errors))
+        band_obs_err = math.sqrt(w_err_sq / w_sum)
+    else:
+        band_obs_err = std_total
+
+    # 4. Min-Max Envelope: computed on frontend since it needs modelTotal
+    #    (the GFD anchor mass). Backend returns raw min/max for the
+    #    frontend to compute max(|M_i - anchor|).
+
+    # 5. IQR (Robust): interquartile range via linear interpolation.
+    #    Resistant to outlier inner points with low enclosed fraction.
+    def _percentile(data, p):
+        """Linear interpolation percentile (same as numpy default)."""
+        k = (len(data) - 1) * p
+        f = int(k)
+        c = min(f + 1, len(data) - 1)
+        d = k - f
+        return data[f] + d * (data[c] - data[f])
+
+    q1 = _percentile(sorted_totals, 0.25)
+    q3 = _percentile(sorted_totals, 0.75)
+    band_iqr = (q3 - q1) / 2.0
+
     return jsonify({
         "points": results,
         "n_points": n,
@@ -346,6 +449,13 @@ def infer_mass_multi_endpoint():
         "weighted_std": round(w_std, 2),
         "log10_weighted_mean": round(math.log10(max(w_mean, 1.0)), 4),
         "weighted_cv_percent": round(w_cv, 2),
+        "min_total": round(min(totals), 2),
+        "max_total": round(max(totals), 2),
+        "band_methods": {
+            "weighted_scatter": round(band_scatter, 2),
+            "obs_error": round(band_obs_err, 2),
+            "iqr": round(band_iqr, 2),
+        },
     })
 
 
