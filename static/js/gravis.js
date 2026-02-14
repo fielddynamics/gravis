@@ -218,7 +218,7 @@ const chart = new Chart(ctx, {
                 pointRadius: 0
             },
             {
-                label: 'Dual Tetrad (Topological)',
+                label: 'Gravity Field Dynamics (Dual Tetrad)',
                 data: [],
                 borderColor: '#4da6ff',
                 backgroundColor: 'rgba(77, 166, 255, 0.1)',
@@ -266,7 +266,7 @@ const chart = new Chart(ctx, {
             },
             title: {
                 display: true,
-                text: 'Galaxy Rotation Curves: Comparison of Gravitational Theories',
+                text: 'Rotation Curve: Gravitational Theory Comparison',
                 color: '#e0e0e0',
                 font: { size: 16, weight: '500' },
                 padding: 20
@@ -563,9 +563,11 @@ function loadExample() {
 
     if (selectedIndex === 0) {
         currentExample = null;
+        chart.options.plugins.title.text = 'Rotation Curve: Gravitational Theory Comparison';
         chart.options.plugins.zoom.limits.x.min = 0;
         chart.options.plugins.zoom.limits.x.max = 100;
         chart.resetZoom();
+        updateDataCardButton();
         updateChart();
         return;
     }
@@ -575,6 +577,10 @@ function loadExample() {
     const galaxies = galaxyCatalog[currentMode] || [];
     const example = galaxies[selectedIndex - 1];
     if (!example) { isLoadingExample = false; return; }
+
+    // Extract galaxy display name (strip mass info in parentheses)
+    const galaxyLabel = example.name.replace(/\s*\(.*\)/, '');
+    chart.options.plugins.title.text = galaxyLabel + ' \u2014 Rotation Curve';
 
     chart.data.datasets[3].data = [];
     chart.data.datasets[3].hidden = true;
@@ -614,6 +620,7 @@ function loadExample() {
     updateChart().then(() => {
         chart.resetZoom();
         hideResetButton();
+        updateDataCardButton();
         isLoadingExample = false;
     });
 }
@@ -839,9 +846,108 @@ async function init() {
     navigateToScreen(hash);
 }
 
+// =====================================================================
+// DATA PROVENANCE MODAL
+// =====================================================================
+
+function formatMass(m) {
+    if (m === 0) return '0';
+    const exp = Math.floor(Math.log10(m));
+    const coeff = m / Math.pow(10, exp);
+    return coeff.toFixed(2) + '\u00D710' + superscript(exp);
+}
+
+function openDataCard() {
+    if (!currentExample) return;
+    const ex = currentExample;
+
+    // Title
+    const label = ex.name.replace(/\s*\(.*\)/, '');
+    document.getElementById('dc-title').textContent = label + ' \u2014 Data Provenance';
+
+    // Summary
+    const mm = ex.mass_model;
+    const totalM = (mm.bulge ? mm.bulge.M : 0) + (mm.disk ? mm.disk.M : 0) + (mm.gas ? mm.gas.M : 0);
+    const gasFrac = mm.gas ? ((mm.gas.M / totalM) * 100).toFixed(0) : '0';
+    const nObs = ex.observations ? ex.observations.length : 0;
+    const rMin = nObs > 0 ? ex.observations[0].r : 0;
+    const rMax = nObs > 0 ? ex.observations[nObs - 1].r : 0;
+
+    document.getElementById('dc-summary').innerHTML =
+        'Total baryonic mass <strong>' + formatMass(totalM) + ' M<sub>sun</sub></strong>' +
+        ' &mdash; gas fraction ' + gasFrac + '%' +
+        ' &mdash; ' + nObs + ' observed data points spanning ' + rMin + '\u2013' + rMax + ' kpc.' +
+        ' All masses are independently measured; no parameters have been fitted to the rotation curve.';
+
+    // Mass model table
+    const tbody = document.getElementById('dc-mass-tbody');
+    tbody.innerHTML = '';
+    if (mm.bulge && mm.bulge.M > 0) {
+        tbody.innerHTML += '<tr><td>Stellar Bulge</td><td>' + formatMass(mm.bulge.M) +
+            '</td><td>a = ' + mm.bulge.a + '</td><td>Hernquist</td></tr>';
+    }
+    if (mm.disk && mm.disk.M > 0) {
+        tbody.innerHTML += '<tr><td>Stellar Disk</td><td>' + formatMass(mm.disk.M) +
+            '</td><td>R<sub>d</sub> = ' + mm.disk.Rd + '</td><td>Exponential</td></tr>';
+    }
+    if (mm.gas && mm.gas.M > 0) {
+        tbody.innerHTML += '<tr><td>Gas (HI+He)</td><td>' + formatMass(mm.gas.M) +
+            '</td><td>R<sub>d</sub> = ' + mm.gas.Rd + '</td><td>Exponential</td></tr>';
+    }
+    document.getElementById('dc-total-mass').innerHTML =
+        'Total: ' + formatMass(totalM) + ' M<sub>sun</sub>';
+
+    // Observations table
+    const obsTbody = document.getElementById('dc-obs-tbody');
+    obsTbody.innerHTML = '';
+    if (ex.observations) {
+        ex.observations.forEach(obs => {
+            obsTbody.innerHTML += '<tr><td>' + obs.r + '</td><td>' +
+                obs.v + '</td><td>\u00B1 ' + obs.err + '</td></tr>';
+        });
+    }
+
+    // References
+    const refList = document.getElementById('dc-references');
+    refList.innerHTML = '';
+    if (ex.references) {
+        ex.references.forEach(ref => {
+            refList.innerHTML += '<li>' + ref + '</li>';
+        });
+    }
+
+    // Methodology note
+    document.getElementById('dc-methodology').innerHTML =
+        '<strong>Methodology:</strong> Stellar masses derived from Spitzer 3.6 \u03BCm luminosity ' +
+        'with fixed M*/L = 0.5 M<sub>sun</sub>/L<sub>sun</sub> (stellar population synthesis, not fitted). ' +
+        'Gas masses from 21 cm HI observations with 1.33\u00D7 He correction ' +
+        '(Big Bang nucleosynthesis). Rotation curves from tilted-ring model fits to HI velocity fields. ' +
+        'No dark matter. No free parameters.';
+
+    // Flip: hide chart, show data
+    document.getElementById('chart-face').style.display = 'none';
+    document.getElementById('data-face').style.display = 'block';
+}
+
+function closeDataCard() {
+    // Flip back: show chart, hide data
+    document.getElementById('data-face').style.display = 'none';
+    document.getElementById('chart-face').style.display = 'block';
+}
+
+// Show/hide Data Sources button based on whether a galaxy is loaded
+function updateDataCardButton() {
+    const btn = document.getElementById('data-card-btn');
+    if (btn) {
+        btn.style.display = (currentExample && currentExample.mass_model) ? 'block' : 'none';
+    }
+}
+
 // Expose navigation function to global scope for onclick handlers
 window.navigateToScreen = navigateToScreen;
 window.setMode = setMode;
 window.loadExample = loadExample;
+window.openDataCard = openDataCard;
+window.closeDataCard = closeDataCard;
 
 init();

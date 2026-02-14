@@ -113,7 +113,7 @@ body {
     text-align: center;
     padding: 50px 0 30px 0;
     width: 100%;
-    max-width: 720px;
+    max-width: 960px;
 }
 
 .about-title {
@@ -143,7 +143,7 @@ body {
 
 .about-content {
     width: 100%;
-    max-width: 720px;
+    max-width: 960px;
     display: flex;
     flex-direction: column;
     gap: 20px;
@@ -176,6 +176,13 @@ body {
     margin-bottom: 0;
 }
 
+.about-lead {
+    font-size: 1.05em;
+    color: #d0d0d0;
+    line-height: 1.7;
+    margin: 0;
+}
+
 .about-card strong {
     color: #ffffff;
 }
@@ -200,6 +207,22 @@ body {
 
 .about-features li strong {
     color: #e0e0e0;
+}
+
+.about-equation {
+    margin: 14px 0;
+    padding: 14px 24px;
+    background: #161616;
+    border: 1px solid #2a2a2a;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.about-eq-line {
+    font-size: 1.05em;
+    color: #e0e0e0;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    letter-spacing: 0.5px;
 }
 
 .about-repo-url {
@@ -248,6 +271,29 @@ body {
 
 .about-citation p:last-child {
     margin-bottom: 0;
+}
+
+.about-references {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.about-references li {
+    font-size: 0.88em;
+    color: #999;
+    line-height: 1.6;
+    padding: 6px 0;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.about-references li:last-child {
+    border-bottom: none;
+}
+
+.about-references li em {
+    color: #b0b0b0;
+    font-style: italic;
 }
 
 .about-footer {
@@ -545,6 +591,7 @@ input[type="range"]::-moz-range-thumb:hover {
     min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .chart-container canvas {
@@ -721,4 +768,164 @@ input[type="range"]::-moz-range-thumb:hover {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-left: 6px;
+}
+
+/* =====================================================================
+   DATA PROVENANCE CARD (in-place flip)
+   Both faces share .card-face inside .chart-container (padding: 20px).
+   Same container, same coordinate system, same button class.
+   ===================================================================== */
+
+/* Both faces fill the chart-container equally.
+   chart-container is flex-column with padding:20px,
+   so each face gets uniform 20px inset automatically. */
+#chart-face,
+#data-face {
+    width: 100%;
+    flex: 1 1 0;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Button style used on both faces */
+.data-card-button {
+    background: rgba(77, 166, 255, 0.12);
+    color: #4da6ff;
+    border: 1px solid rgba(77, 166, 255, 0.3);
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 0.78em;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    z-index: 10;
+    align-self: flex-start;
+}
+/* On chart face the button floats over the canvas */
+#chart-face .data-card-button {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+}
+/* On data face the button sits in the flow */
+#data-face .data-card-button {
+    position: static;
+    flex-shrink: 0;
+}
+.data-card-button:hover {
+    background: rgba(77, 166, 255, 0.25);
+    border-color: rgba(77, 166, 255, 0.6);
+}
+
+/* Visible scrollable content box below the button */
+.data-card-body {
+    margin: 16px 0 0 0;
+    padding: 20px 24px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    color: #c0c0c0;
+    font-size: 0.85em;
+    line-height: 1.6;
+    height: calc(100% - 60px);
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: #333333 #1a1a1a;
+}
+
+/* Scrollbar matching left pane */
+.data-card-body::-webkit-scrollbar { width: 12px; }
+.data-card-body::-webkit-scrollbar-track { background: #1a1a1a; }
+.data-card-body::-webkit-scrollbar-thumb { background: #333333; border-radius: 6px; }
+.data-card-body::-webkit-scrollbar-thumb:hover { background: #444444; }
+
+.dc-title {
+    font-size: 16px;
+    font-weight: 500;
+    color: #e0e0e0;
+    margin: 0 0 6px;
+    letter-spacing: 0.3px;
+}
+
+.data-card-body h3 {
+    color: #4da6ff;
+    font-size: 0.82em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin: 18px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #333;
+}
+.data-card-body h3:first-of-type { margin-top: 8px; }
+
+.dc-section {
+    margin-bottom: 6px;
+    color: #a0a0a0;
+    font-size: 0.95em;
+}
+
+.dc-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 6px;
+    font-size: 0.92em;
+}
+.dc-table th {
+    text-align: left;
+    color: #666;
+    font-weight: 500;
+    font-size: 0.82em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 5px 10px;
+    border-bottom: 1px solid #333;
+}
+.dc-table td {
+    padding: 4px 10px;
+    border-bottom: 1px solid #2a2a2a;
+    color: #c0c0c0;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.93em;
+}
+.dc-table tr:last-child td { border-bottom: none; }
+
+.dc-total {
+    text-align: right;
+    padding: 5px 10px;
+    font-weight: 600;
+    color: #4da6ff;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.9em;
+    border-top: 1px solid #333;
+}
+
+.dc-references {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.dc-references li {
+    padding: 3px 0;
+    color: #999;
+    font-size: 0.9em;
+}
+.dc-references li::before {
+    content: "\2022";
+    color: #4da6ff;
+    margin-right: 8px;
+}
+
+.dc-methodology {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: rgba(77, 166, 255, 0.05);
+    border-left: 3px solid rgba(77, 166, 255, 0.25);
+    border-radius: 0 4px 4px 0;
+    color: #999;
+    font-size: 0.88em;
+    line-height: 1.5;
 }

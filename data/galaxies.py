@@ -9,7 +9,7 @@ DISTRIBUTED MASS MODEL (Hernquist bulge + exponential disks):
 
 BARYONIC MASS PROVENANCE (independently measured, NOT fitted to rotation curves):
   Milky Way: Bland-Hawthorn+2016, McMillan 2017, Kalberla+2009
-  SPARC galaxies (NGC 3198, NGC 2403, NGC 6503): VizieR J/AJ/152/157/table1
+  SPARC galaxies (NGC 3198, NGC 2403, NGC 6503, DDO 154): VizieR J/AJ/152/157/table1
     M_baryon = L[3.6] * (M*/L) + 1.33 * M_HI
     M*/L = 0.5 M_sun/L_sun at 3.6um (stellar population models, NOT fitted)
     1.33 factor = primordial He abundance correction (Big Bang nucleosynthesis)
@@ -130,7 +130,7 @@ PREDICTION_GALAXIES = [
         "accel": 1.0,
         "mass_model": {
             "bulge": {"M": 0.25e9, "a": 0.3},
-            "disk":  {"M": 4.77e9, "Rd": 1.7},
+            "disk":  {"M": 4.77e9, "Rd": 1.29},
             "gas":   {"M": 4.25e9, "Rd": 5.0},
         },
         "observations": [
@@ -148,32 +148,66 @@ PREDICTION_GALAXIES = [
             "de Blok+2008 AJ 136 2648 (THINGS)",
         ],
     },
+    # === GAS-DOMINATED DWARFS ===
     {
-        "id": "m33",
-        "name": "M33 Triangulum (M = 5x10^9 M_sun)",
-        "distance": 20,
-        "mass": 9.7,
+        "id": "ddo154",
+        "name": "DDO 154 (M = 5x10^8 M_sun)",
+        "distance": 10,
+        "mass": 8.701,
         "accel": 1.0,
         "mass_model": {
-            "bulge": {"M": 0.1e9, "a": 0.2},
-            "disk":  {"M": 2.0e9, "Rd": 1.4},
-            "gas":   {"M": 2.9e9, "Rd": 7.0},
+            "bulge": {"M": 0, "a": 0.1},
+            "disk":  {"M": 1.95e7, "Rd": 0.40},
+            "gas":   {"M": 4.83e8, "Rd": 2.0},
         },
         "observations": [
-            {"r": 1,  "v": 45,  "err": 10},
-            {"r": 2,  "v": 68,  "err": 8},
-            {"r": 4,  "v": 100, "err": 5},
-            {"r": 6,  "v": 108, "err": 5},
-            {"r": 8,  "v": 112, "err": 5},
-            {"r": 10, "v": 117, "err": 5},
-            {"r": 12, "v": 122, "err": 6},
-            {"r": 14, "v": 128, "err": 8},
-            {"r": 16, "v": 130, "err": 10},
+            {"r": 0.5, "v": 15, "err": 3},
+            {"r": 1.0, "v": 24, "err": 2},
+            {"r": 1.5, "v": 31, "err": 2},
+            {"r": 2.0, "v": 35, "err": 2},
+            {"r": 2.5, "v": 38, "err": 2},
+            {"r": 3.0, "v": 39, "err": 2},
+            {"r": 4.0, "v": 42, "err": 2},
+            {"r": 5.0, "v": 44, "err": 2},
+            {"r": 6.0, "v": 45, "err": 3},
+            {"r": 7.0, "v": 46, "err": 4},
+            {"r": 7.5, "v": 46, "err": 5},
         ],
         "references": [
-            "Corbelli & Salucci 2000 MNRAS 311 441",
-            "Corbelli 2003 MNRAS 342 199",
-            "Corbelli 2014 A&A (VLA+GBT)",
+            "SPARC: Lelli+2016 AJ 152 157",
+            "Carignan & Beaulieu 1989 ApJ 347 760",
+            "Oh+2015 AJ 149 180 (LITTLE THINGS)",
+        ],
+    },
+    {
+        "id": "ic2574",
+        "name": "IC 2574 (M = 1.1x10^9 M_sun)",
+        "distance": 13,
+        "mass": 9.051,
+        "accel": 1.0,
+        "mass_model": {
+            "bulge": {"M": 0, "a": 0.1},
+            "disk":  {"M": 9.31e7, "Rd": 1.70},
+            "gas":   {"M": 1.032e9, "Rd": 4.0},
+        },
+        "observations": [
+            {"r": 0.5, "v": 10, "err": 5},
+            {"r": 1.0, "v": 17, "err": 4},
+            {"r": 2.0, "v": 30, "err": 3},
+            {"r": 3.0, "v": 40, "err": 3},
+            {"r": 4.0, "v": 48, "err": 3},
+            {"r": 5.0, "v": 54, "err": 3},
+            {"r": 6.0, "v": 59, "err": 3},
+            {"r": 7.0, "v": 62, "err": 3},
+            {"r": 8.0, "v": 65, "err": 3},
+            {"r": 9.0, "v": 66, "err": 4},
+            {"r": 10.0, "v": 67, "err": 4},
+            {"r": 11.0, "v": 66, "err": 5},
+        ],
+        "references": [
+            "SPARC: Lelli+2016 AJ 152 157",
+            "Oh+2008 AJ 136 2761 (THINGS)",
+            "Walter+2008 AJ 136 2563 (THINGS)",
         ],
     },
     {
@@ -204,25 +238,38 @@ PREDICTION_GALAXIES = [
             "Greisen+2009 AJ 137 4718",
         ],
     },
+    {
+        "id": "m33",
+        "name": "M33 Triangulum (M = 4x10^9 M_sun)",
+        "distance": 20,
+        "mass": 9.598,
+        "accel": 1.0,
+        "mass_model": {
+            "bulge": {"M": 0.1e9, "a": 0.2},
+            "disk":  {"M": 2.0e9, "Rd": 1.4},
+            "gas":   {"M": 1.86e9, "Rd": 7.0},
+        },
+        "observations": [
+            {"r": 1,  "v": 45,  "err": 10},
+            {"r": 2,  "v": 68,  "err": 8},
+            {"r": 4,  "v": 100, "err": 5},
+            {"r": 6,  "v": 108, "err": 5},
+            {"r": 8,  "v": 112, "err": 5},
+            {"r": 10, "v": 117, "err": 5},
+            {"r": 12, "v": 122, "err": 6},
+            {"r": 14, "v": 128, "err": 8},
+            {"r": 16, "v": 130, "err": 10},
+        ],
+        "references": [
+            "Corbelli & Salucci 2000 MNRAS 311 441",
+            "Corbelli 2003 MNRAS 342 199",
+            "Corbelli 2014 A&A (VLA+GBT)",
+        ],
+    },
 ]
 
 # Simple prediction examples (no mass model / observations)
-SIMPLE_PREDICTION_GALAXIES = [
-    {
-        "id": "ic2574",
-        "name": "IC 2574 Dwarf (M = 1x10^9 M_sun)",
-        "distance": 12,
-        "mass": 9.0,
-        "accel": 1.0,
-    },
-    {
-        "id": "generic_dwarf",
-        "name": "Generic Dwarf (M = 1x10^9 M_sun)",
-        "distance": 15,
-        "mass": 9.0,
-        "accel": 1.0,
-    },
-]
+SIMPLE_PREDICTION_GALAXIES = []
 
 INFERENCE_GALAXIES = [
     # Each inference example includes a mass_model "shape" from its prediction
@@ -297,7 +344,31 @@ INFERENCE_GALAXIES = [
         "mass_model": {
             "bulge": {"M": 0.1e9, "a": 0.2},
             "disk":  {"M": 2.0e9, "Rd": 1.4},
-            "gas":   {"M": 2.9e9, "Rd": 7.0},
+            "gas":   {"M": 1.86e9, "Rd": 7.0},
+        },
+    },
+    {
+        "id": "ddo154_inference",
+        "name": "DDO 154 (v = 44 km/s at 5 kpc)",
+        "distance": 5,
+        "velocity": 44,
+        "accel": 1.0,
+        "mass_model": {
+            "bulge": {"M": 0, "a": 0.1},
+            "disk":  {"M": 1.95e7, "Rd": 0.40},
+            "gas":   {"M": 4.83e8, "Rd": 2.0},
+        },
+    },
+    {
+        "id": "ic2574_inference",
+        "name": "IC 2574 (v = 66 km/s at 9 kpc)",
+        "distance": 9,
+        "velocity": 66,
+        "accel": 1.0,
+        "mass_model": {
+            "bulge": {"M": 0, "a": 0.1},
+            "disk":  {"M": 9.31e7, "Rd": 1.70},
+            "gas":   {"M": 1.032e9, "Rd": 4.0},
         },
     },
 ]
