@@ -35,6 +35,11 @@ def create_app():
     def stellated_octahedron():
         return render_template("stellated_octahedron.html")
 
+    # Field page (standalone, isolates Three.js from the main app)
+    @app.route("/field")
+    def field():
+        return render_template("field.html")
+
     # Serve the main page
     @app.route("/")
     def index():

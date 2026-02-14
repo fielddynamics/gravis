@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRAVIS: The Gravitational Field</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/gravis.css') }}">
+</head>
+<body style="display: flex; flex-direction: column; height: 100vh; overflow: hidden;">
+    <!-- Top Navigation Bar -->
+    <nav class="nav-bar">
+        <a class="nav-logo" href="/" style="text-decoration: none;">GRAVIS</a>
+        <div class="nav-items">
+            <a class="nav-item" href="/#analysis" style="text-decoration: none;">Analysis</a>
+            <a class="nav-item" href="/#about" style="text-decoration: none;">About</a>
+            <a class="nav-item active" href="/field" style="text-decoration: none;">Field</a>
+            <a class="nav-item nav-item-right" href="/#faq" style="text-decoration: none;">FAQ</a>
+        </div>
+    </nav>
+
+    <div class="prose-screen" style="flex: 1; overflow-y: auto;">
+        <div class="prose">
+            <h1>The Gravitational Field</h1>
+            <p class="prose-subtitle">Visualizing the internal structure of gravity</p>
+
+            <p>Gravity has structure. At every point in spacetime, the gravitational field can be described by a set of four basis vectors called a tetrad. These four vectors define directions and scales at that point, and together they form a tetrahedron: a four-faced solid that is the simplest possible enclosed volume in three dimensions. In this framework, a single tetrahedron is the minimal gravitational field chamber.</p>
+
+            <h2>From Neighbours to Chambers</h2>
+
+            <p>Consider one gravitational field point sitting in a lattice. In three-dimensional space, with simplex number k = 4, each field point has exactly 12 nearest neighbours. This is the same count that appears in close-packed crystal structures (face-centred cubic, hexagonal close-packed) and is a direct consequence of how four-dimensional simplices tile space. Twelve neighbours, arranged symmetrically around a center.</p>
+
+            <p>When these 12 neighbouring fields couple to the central point through standard field-theoretic interactions, the coupling pattern is not uniform. The neighbours partition into two groups of six, each group forming the vertices of an octahedron. But the coupling within each group is not octahedral. It is tetrahedral: within each group, the six pairwise interactions between four of the neighbours define a tetrahedron. The result is two tetrahedral field chambers, each built from the coupling of the central field to its neighbours. This is not imposed by hand. It follows from the geometry of field packing at k = 4.</p>
+
+            <h2>The Stellated Octahedron</h2>
+
+            <p>The two tetrahedra are oriented in opposite directions and share a common center, forming a stellated octahedron (also known as a stella octangula). The coupling between them operates at three levels. First, the two chambers are strongly coupled as complete units: each tetrahedron interacts with the other as a whole. Second, their faces are coupled: each of the four faces of one chamber aligns with and couples to the faces of the other, creating k = 4 face-to-face channels. Third, at the shared center sits the Field Origin, the interaction vertex where the two field chambers connect through a non-linear coupling term. This is the point in the bimetric framework where both metrics meet, and it is where the field dynamics are determined.</p>
+
+            <p>The structure below is a stellated octahedron: two interpenetrating tetrahedra rendered in three dimensions. The central point is the Field Origin.</p>
+
+            <iframe src="/stellated-octahedron"
+                    style="width: 100%; height: 560px; border: none; border-radius: 4px; background: #000000; margin: 24px 0;">
+            </iframe>
+
+            <h2>Field Dynamics</h2>
+
+            <p>The coupling between the two field chambers produces three structural levels, encoded in the polynomial f(k) = 1 + k + k<sup>2</sup>, where k = 4 is the simplex number. The first term is the Field Origin itself: the shared center where both chambers interact. The second term counts the four face-to-face coupling channels. The third term counts all sixteen cross-chamber couplings, every face of one chamber to every face of the other.</p>
+
+            <p>Below a characteristic acceleration scale, the field can no longer sustain full coupling across all k<sup>2</sup> = 16 channels. It enters partial coupling, and the effective gravitational response is enhanced. This is field dynamics: the internal structure of the gravitational field governing its own strength.</p>
+        </div>
+    </div>
+</body>
+</html>
