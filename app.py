@@ -30,6 +30,11 @@ def create_app():
     def splash():
         return render_template("splash.html")
 
+    # Stellated octahedron Three.js page (served in iframe)
+    @app.route("/stellated-octahedron")
+    def stellated_octahedron():
+        return render_template("stellated_octahedron.html")
+
     # Serve the main page
     @app.route("/")
     def index():

@@ -25,18 +25,24 @@
                 100% { left: 0; }
             }
         </style>
-        <div style="display: flex; flex-direction: column; align-items: stretch;">
+        <div style="display: flex; flex-direction: column; align-items: stretch;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    user-select: none;">
             <div style="
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                 font-size: 4.5em; font-weight: 700;
                 color: #4da6ff; letter-spacing: 12px;
-                user-select: none; text-align: center;
+                text-align: center;
             ">GRAVIS</div>
+            <div style="
+                font-size: 1.05em; font-weight: 400;
+                color: #707070; letter-spacing: 0.5px;
+                text-align: center; margin-top: 10px;
+            ">Galactic Rotation from Field Dynamics</div>
             <div style="
                 width: 100%; height: 3px;
                 background: #1a1a1a;
                 border-radius: 2px;
-                margin-top: 32px;
+                margin-top: 28px;
                 position: relative;
                 overflow: hidden;
             ">
@@ -48,6 +54,11 @@
                     animation: splashBounce 1.4s ease-in-out infinite;
                 "></div>
             </div>
+            <div style="
+                font-size: 0.72em; font-weight: 400;
+                color: #333333; letter-spacing: 0.5px;
+                text-align: center; margin-top: 24px;
+            ">Open Source &middot; MIT License &middot; 2026</div>
         </div>
     </div>
 
@@ -57,6 +68,7 @@
         <div class="nav-items">
             <div class="nav-item active" data-screen="analysis" onclick="navigateToScreen('analysis')">Analysis</div>
             <div class="nav-item" data-screen="about" onclick="navigateToScreen('about')">About</div>
+            <div class="nav-item" data-screen="field" onclick="navigateToScreen('field')">Field</div>
             <div class="nav-item nav-item-right" data-screen="faq" onclick="navigateToScreen('faq')">FAQ</div>
         </div>
     </nav>
@@ -292,7 +304,7 @@
                     <p class="faq-subtitle">Search or browse questions about GRAVIS and Gravity Field Dynamics</p>
                     <div class="faq-search-wrapper">
                         <input type="text" id="faq-search" class="faq-search" placeholder="Search questions..." autocomplete="off">
-                        <span class="faq-search-icon">&#x1F50D;</span>
+                        <span class="faq-search-icon"></span>
                         <span class="faq-search-clear" id="faq-search-clear" style="display:none;">&#x2715;</span>
                     </div>
                     <div class="faq-controls">
@@ -309,150 +321,129 @@
 
         <!-- About Screen -->
         <div class="screen" id="screen-about">
-            <div class="about-screen">
-                <div class="about-hero">
-                    <h1 class="about-title">GRAVIS</h1>
-                    <p class="about-subtitle">Galactic Rotation from Field Dynamics</p>
-                    <p class="about-version">v1.0</p>
+            <div class="prose-screen">
+                <div class="prose">
+                    <h1>About GRAVIS</h1>
+                    <p class="prose-subtitle">Galactic Rotation from Field Dynamics</p>
+
+                    <p>Gravity Field Dynamics (GFD) is the operational gravitational framework derived from the covariant completion of Dual Tetrad Gravity, enabling zero-parameter predictions of galactic rotation and related phenomena. GRAVIS is the modeling engine that implements it.</p>
+
+                    <p>The progression from theory to tool follows four steps. The geometric origin is <strong>Dual Tetrad Topology</strong>: two tetrahedral field chambers coupled at a shared center, the Field Origin. The covariant completion produces a <strong>zero-parameter scalar-tensor action</strong> in which the Lagrangian, the field equation, and the acceleration scale are all derived from the topology. The working formulation is <strong>Gravity Field Dynamics</strong>, the field-level theory used for prediction, inference, and comparison. The software implementation is <strong>GRAVIS</strong>, the modeling engine that computes rotation curves, infers mass, and validates against observations.</p>
+
+                    <h2>The Problem</h2>
+
+                    <p>Stars in the outer regions of spiral galaxies orbit faster than Newtonian gravity predicts from visible matter alone. This discrepancy appears consistently across hundreds of galaxies spanning four orders of magnitude in mass (Lelli et al. 2016). The standard resolution posits dark matter halos containing approximately 85% of each galaxy's gravitating mass, yet four decades of direct-detection experiments have produced no confirmed particle.</p>
+
+                    <p>An alternative possibility: the discrepancy reflects not missing mass but missing structure in the gravitational field itself. If the field possesses internal coupling architecture that modifies its response below a characteristic acceleration scale, the observed rotation curves may follow from baryonic matter alone.</p>
+
+                    <h2>Dual Tetrad Gravity</h2>
+
+                    <p>The tetrad formulation of general relativity decomposes the metric into four basis vectors at each spacetime point, forming a tetrahedron: the minimal gravitational field chamber in three spatial dimensions. Four independent arguments from stability analysis, spinor structure, chirality, and the bimetric gravity framework establish that two such field chambers are required, coupled with opposite orientations to form a stellated octahedron sharing a common center: the Field Origin.</p>
+
+                    <p>The coupling hierarchy of this structure is governed by a polynomial in the simplex number k = 4:</p>
+
+                    <div class="eq">f(k) = 1 + k + k<sup>2</sup></div>
+
+                    <p>The three terms encode the three structural levels: the Field Origin (1), the face coupling channels (k = 4), and the full field interaction between both chambers (k<sup>2</sup> = 16, all four faces of one coupling to all four faces of the other). This polynomial, combined with the topology, uniquely determines the Lagrangian, the acceleration scale, and the complete gravitational action. There are no free parameters.</p>
+
+                    <h2>Gravity Field Dynamics</h2>
+
+                    <p>Gravity Field Dynamics is the operational formulation that emerges from the covariant completion. It provides a closed-form field equation relating the true gravitational field to the Newtonian field at every radius. Given the enclosed baryonic mass, GFD computes the predicted rotation velocity in a single algebraic step: no numerical integration, no iteration, no fitting.</p>
+
+                    <p>The topology determines a characteristic acceleration scale below which the field cannot sustain full coupling across all k<sup>2</sup> = 16 channels:</p>
+
+                    <div class="eq">a<sub>0</sub> = k<sup>2</sup> G m<sub>e</sub> / r<sub>e</sub><sup>2</sup> &asymp; 1.22 &times; 10<sup>&minus;10</sup> m/s<sup>2</sup></div>
+
+                    <p>Above this scale, gravity is Newtonian. Below it, the field enters partial coupling and the effective gravitational response is enhanced. This is why rotation curves are flat at large radii: the acceleration drops below a<sub>0</sub>, the field enters partial coupling, and the velocity remains higher than Newton predicts.</p>
+
+                    <p>The field equation is bidirectional. The forward direction takes mass and predicts velocity. The inverse direction takes velocity and infers mass. Both are algebraic. This bidirectionality is what enables GRAVIS to operate in both prediction mode and inference mode from the same Lagrangian.</p>
+
+                    <h2>Relationship to MOND and CDM</h2>
+
+                    <p>In 1983, Milgrom proposed an empirical modification to Newtonian dynamics that successfully predicts rotation curves across the full galaxy population from baryonic mass alone (McGaugh 2011; Lelli et al. 2017). What MOND lacks is a derivation: both the interpolating function and the acceleration scale are empirical inputs.</p>
+
+                    <p>GFD derives both from the topology of the gravitational field. What Milgrom discovered empirically, the field dynamics produces from the Lagrangian. This is why the GFD and MOND curves appear similar on every rotation curve plot: they share the same deep-field limit. They differ in the transition regime, and crucially, in origin.</p>
+
+                    <p>The standard cosmological model achieves the same empirical fit by adding a dark matter halo with at least 2 free parameters per galaxy. GRAVIS displays the CDM prediction alongside GFD so the reader can see both matching the observations: one with zero parameters, the other with two or more.</p>
+
+                    <h2>What GRAVIS Computes</h2>
+
+                    <p>For each galaxy, GRAVIS constructs the enclosed baryonic mass from three independently measured components: a Hernquist stellar bulge, an exponential stellar disk, and an exponential gas disk. Stellar masses derive from Spitzer 3.6 &mu;m photometry. Gas masses derive from 21 cm HI observations. No component is fitted to rotation curve data.</p>
+
+                    <p>GRAVIS evaluates four rotation curves on the same plot:</p>
+
+                    <ul>
+                        <li><strong>Newtonian</strong>: the baseline prediction from visible matter alone.</li>
+                        <li><strong>GFD (Dual Tetrad)</strong>: the zero-parameter prediction from the covariant completion.</li>
+                        <li><strong>Classical MOND</strong>: the empirical Milgrom formulation with the same acceleration scale.</li>
+                        <li><strong>CDM + NFW</strong>: the standard dark matter prediction, fitted to observations when available.</li>
+                    </ul>
+
+                    <p>The multi-point consistency panel in inference mode goes further: it tests whether every observation point independently infers the same total baryonic mass. Agreement across the full radial range, without parameter tuning, is the non-trivial result. See the FAQ for the full mathematical detail.</p>
+
+                    <h2>Capabilities</h2>
+
+                    <ul>
+                        <li><strong>Forward Prediction</strong>: compute rotation curves from baryonic mass (M &rarr; v)</li>
+                        <li><strong>Inverse Inference</strong>: infer baryonic mass from observed velocities (v &rarr; M)</li>
+                        <li><strong>Four-Theory Comparison</strong>: Newtonian, GFD, MOND, and CDM on a single plot</li>
+                        <li><strong>Multi-Point Consistency</strong>: per-point residuals, sigma deviations, and shape diagnostics</li>
+                        <li><strong>Observational Overlay</strong>: published kinematic data with 1-sigma error bars for direct validation</li>
+                        <li><strong>Data Provenance</strong>: full mass model, observational data, and literature references for each galaxy</li>
+                        <li><strong>Ten Galaxies</strong>: Milky Way, Andromeda, M33, NGC 3198, NGC 2403, NGC 6503, UGC 2885, IC 2574, DDO 154, NGC 3109</li>
+                        <li><strong>REST API</strong>: programmatic access to all computations</li>
+                        <li><strong>373 Unit Tests</strong>: full test coverage of physics engine, inference pipeline, and API</li>
+                    </ul>
+
+                    <h2>Source Code</h2>
+
+                    <p><a href="https://github.com/fielddynamics/gravis" target="_blank" rel="noopener noreferrer">github.com/fielddynamics/gravis</a></p>
+
+                    <h2>Citation</h2>
+
+                    <div class="cite">
+                        <p><strong>Software:</strong><br>
+                        Nelson, S. (2026). GRAVIS: Galactic Rotation from Field Dynamics.<br>
+                        <a href="https://github.com/fielddynamics/gravis" target="_blank" rel="noopener noreferrer">https://github.com/fielddynamics/gravis</a></p>
+                        <p><strong>Theory:</strong><br>
+                        Nelson, S. (2026). "Dual Tetrad Topology and the Field Origin: From Nuclear Decay to Galactic Dynamics."</p>
+                    </div>
+
+                    <h2>References</h2>
+
+                    <ul class="ref-list">
+                        <li>Milgrom, M. (1983). A modification of the Newtonian dynamics as a possible alternative to the hidden mass hypothesis. <em>ApJ</em> 270, 365.</li>
+                        <li>Bekenstein, J. &amp; Milgrom, M. (1984). Does the missing mass problem signal the breakdown of Newtonian gravity? <em>ApJ</em> 286, 7.</li>
+                        <li>McGaugh, S. S. (2011). Novel test of modified Newtonian dynamics with gas rich galaxies. <em>PRL</em> 106, 121303.</li>
+                        <li>Hassan, S. F. &amp; Rosen, R. A. (2012). Bimetric gravity from ghost-free massive gravity. <em>JHEP</em> 02, 126.</li>
+                        <li>Lelli, F., McGaugh, S. S. &amp; Schombert, J. M. (2016). SPARC: Mass models for 175 disk galaxies. <em>AJ</em> 152, 157.</li>
+                        <li>Lelli, F., McGaugh, S. S., Schombert, J. M. &amp; Pawlowski, M. S. (2017). One law to rule them all: The radial acceleration relation. <em>ApJ</em> 836, 152.</li>
+                    </ul>
+
+                    <div class="prose-footer">Stephen Nelson &middot; Independent Researcher &middot; ORCID 0009-0008-6190-3269</div>
                 </div>
+            </div>
+        </div>
+        <!-- Field Screen -->
+        <div class="screen" id="screen-field">
+            <div class="prose-screen">
+                <div class="prose">
+                    <h1>The Gravitational Field</h1>
+                    <p class="prose-subtitle">Visualizing the internal structure of gravity</p>
 
-                <div class="about-content">
+                    <p>Gravity has structure. The tetrad formulation of general relativity decomposes the metric into four basis vectors at each spacetime point, forming a tetrahedron: the minimal gravitational field chamber in three spatial dimensions. Stability, spinor structure, chirality, and the bimetric framework each independently require a second chamber. The result is two field chambers coupled with opposite orientation, sharing a single interaction vertex. In the language of bimetric gravity, this is the point where both metrics meet. We call it the Field Origin.</p>
 
-                    <div class="about-card">
-                        <p class="about-lead">Gravity Field Dynamics (GFD) is the operational gravitational framework derived from the covariant completion of Dual Tetrad Gravity, enabling zero-parameter predictions of galactic rotation and related phenomena.</p>
-                        <p class="about-lead">GRAVIS is the modeling engine that implements it.</p>
-                    </div>
+                    <p>The structure below is a stellated octahedron: two interpenetrating tetrahedra sharing a common center. This is the geometry that satisfies all four independent requirements for the gravitational field. The central point is the Field Origin, where the dynamics of both field chambers converge.</p>
 
-                    <!-- 1. THE STACK -->
-                    <div class="about-card">
-                        <h2>From Theory to Tool</h2>
-                        <div class="about-stack">
-                            <div class="about-stack-item">
-                                <span class="about-stack-label">Geometric origin</span>
-                                <span class="about-stack-value">Dual Tetrad Topology</span>
-                                <span class="about-stack-desc">Two tetrahedral field chambers coupled at a shared center, the Field Origin</span>
-                            </div>
-                            <div class="about-stack-arrow">&darr;</div>
-                            <div class="about-stack-item">
-                                <span class="about-stack-label">Covariant completion</span>
-                                <span class="about-stack-value">Zero-parameter scalar-tensor action</span>
-                                <span class="about-stack-desc">The Lagrangian, the field equation, and the acceleration scale are all derived from the topology</span>
-                            </div>
-                            <div class="about-stack-arrow">&darr;</div>
-                            <div class="about-stack-item">
-                                <span class="about-stack-label">Working formulation</span>
-                                <span class="about-stack-value">Gravity Field Dynamics (GFD)</span>
-                                <span class="about-stack-desc">The field-level formulation used for prediction, inference, and comparison</span>
-                            </div>
-                            <div class="about-stack-arrow">&darr;</div>
-                            <div class="about-stack-item">
-                                <span class="about-stack-label">Software</span>
-                                <span class="about-stack-value">GRAVIS</span>
-                                <span class="about-stack-desc">The modeling engine that computes rotation curves, infers mass, and validates against observations</span>
-                            </div>
-                        </div>
-                        <p>Dual Tetrad Gravity provides the geometric origin. Gravity Field Dynamics is the working formulation used for prediction. This is the natural progression from paper to math to model to tool.</p>
-                    </div>
+                    <iframe id="field-iframe" data-src="/stellated-octahedron"
+                            style="width: 100%; height: 560px; border: none; border-radius: 4px; background: #000000; margin: 24px 0;">
+                    </iframe>
 
-                    <!-- 2. THE PROBLEM -->
-                    <div class="about-card">
-                        <h2>The Problem</h2>
-                        <p>Stars in the outer regions of spiral galaxies orbit faster than Newtonian gravity predicts from visible matter alone. This discrepancy appears consistently across hundreds of galaxies spanning four orders of magnitude in mass (Lelli et al. 2016). The standard resolution posits dark matter halos containing approximately 85% of each galaxy's gravitating mass, yet four decades of direct-detection experiments have produced no confirmed particle.</p>
-                        <p>An alternative possibility: the discrepancy reflects not missing mass but missing structure in the gravitational field itself. If the field possesses internal coupling architecture that modifies its response below a characteristic acceleration scale, the observed rotation curves may follow from baryonic matter alone.</p>
-                    </div>
+                    <h2>Field Dynamics</h2>
 
-                    <!-- 3. THE ORIGIN -->
-                    <div class="about-card">
-                        <h2>Dual Tetrad Gravity</h2>
-                        <p>The tetrad formulation of general relativity decomposes the metric into four basis vectors at each spacetime point, forming a tetrahedron -- the minimal gravitational field chamber in three spatial dimensions. Four independent arguments from stability analysis, spinor structure, chirality, and the bimetric gravity framework establish that two such field chambers are required, coupled with opposite orientations to form a stellated octahedron sharing a common center: the Field Origin.</p>
-                        <p>The coupling hierarchy of this structure is governed by a polynomial in the simplex number k = 4:</p>
-                        <div class="about-equation">
-                            <span class="about-eq-line">f(k) = 1 + k + k<sup>2</sup></span>
-                        </div>
-                        <p>The three terms encode the three structural levels: the Field Origin (1), the face coupling channels (k = 4), and the full field interaction between both chambers (k<sup>2</sup> = 16, all four faces of one coupling to all four faces of the other). This polynomial, combined with the topology, uniquely determines the Lagrangian, the acceleration scale, and the complete gravitational action. There are no free parameters.</p>
-                    </div>
+                    <p>The coupling between the two field chambers produces three structural levels, encoded in the polynomial f(k) = 1 + k + k<sup>2</sup>, where k = 4 is the simplex number. The first term is the Field Origin itself: the shared center where both chambers interact. The second term counts the four face-to-face coupling channels. The third term counts all sixteen cross-chamber couplings, every face of one chamber to every face of the other.</p>
 
-                    <!-- 4. THE FRAMEWORK -->
-                    <div class="about-card">
-                        <h2>Gravity Field Dynamics</h2>
-                        <p>Gravity Field Dynamics is the operational formulation that emerges from the covariant completion. It provides a closed-form field equation relating the true gravitational field to the Newtonian field at every radius. Given the enclosed baryonic mass, GFD computes the predicted rotation velocity in a single algebraic step -- no numerical integration, no iteration, no fitting.</p>
-                        <p>The topology determines a characteristic acceleration scale below which the field cannot sustain full coupling across all k<sup>2</sup> = 16 channels:</p>
-                        <div class="about-equation">
-                            <span class="about-eq-line">a<sub>0</sub> = k<sup>2</sup> G m<sub>e</sub> / r<sub>e</sub><sup>2</sup> &asymp; 1.22 &times; 10<sup>&minus;10</sup> m/s<sup>2</sup></span>
-                        </div>
-                        <p>Above this scale, gravity is Newtonian. Below it, the field enters partial coupling and the effective gravitational response is enhanced. This is why rotation curves are flat at large radii: the acceleration drops below a<sub>0</sub>, the field enters partial coupling, and the velocity remains higher than Newton predicts.</p>
-                        <p>The field equation is bidirectional. The forward direction takes mass and predicts velocity. The inverse direction takes velocity and infers mass. Both are algebraic. This bidirectionality is what enables GRAVIS to operate in both prediction mode and inference mode from the same Lagrangian.</p>
-                    </div>
-
-                    <!-- 5. CONNECTION TO MOND AND CDM -->
-                    <div class="about-card">
-                        <h2>Where GFD Sits</h2>
-                        <p>In 1983, Milgrom proposed an empirical modification to Newtonian dynamics that successfully predicts rotation curves across the full galaxy population from baryonic mass alone (McGaugh 2011; Lelli et al. 2017). What MOND lacks is a derivation: both the interpolating function and the acceleration scale are empirical inputs.</p>
-                        <p>GFD derives both from the topology of the gravitational field. What Milgrom discovered empirically, the field dynamics produces from the Lagrangian. This is why the GFD and MOND curves appear similar on every rotation curve plot: they share the same deep-field limit. They differ in the transition regime, and crucially, in origin.</p>
-                        <p>The standard cosmological model achieves the same empirical fit by adding a dark matter halo with at least 2 free parameters per galaxy. GRAVIS displays the CDM prediction alongside GFD so the reader can see both matching the observations -- one with zero parameters, the other with two or more.</p>
-                    </div>
-
-                    <!-- 6. WHAT GRAVIS COMPUTES -->
-                    <div class="about-card">
-                        <h2>What GRAVIS Computes</h2>
-                        <p>For each galaxy, GRAVIS constructs the enclosed baryonic mass from three independently measured components: a Hernquist stellar bulge, an exponential stellar disk, and an exponential gas disk. Stellar masses derive from Spitzer 3.6 &mu;m photometry. Gas masses derive from 21 cm HI observations. No component is fitted to rotation curve data.</p>
-                        <p>GRAVIS evaluates four rotation curves on the same plot:</p>
-                        <ul class="about-features">
-                            <li><strong>Newtonian</strong>: The baseline prediction from visible matter alone.</li>
-                            <li><strong>GFD (Dual Tetrad)</strong>: The zero-parameter prediction from the covariant completion.</li>
-                            <li><strong>Classical MOND</strong>: The empirical Milgrom formulation with the same acceleration scale.</li>
-                            <li><strong>CDM + NFW</strong>: The standard dark matter prediction, fitted to observations when available.</li>
-                        </ul>
-                        <p>The multi-point consistency panel in inference mode goes further: it tests whether every observation point independently infers the same total baryonic mass. Agreement across the full radial range, without parameter tuning, is the non-trivial result. See the FAQ for the full mathematical detail.</p>
-                    </div>
-
-                    <!-- 7. CAPABILITIES -->
-                    <div class="about-card">
-                        <h2>Capabilities</h2>
-                        <ul class="about-features">
-                            <li><strong>Forward Prediction</strong>: Compute rotation curves from baryonic mass (M &rarr; v)</li>
-                            <li><strong>Inverse Inference</strong>: Infer baryonic mass from observed velocities (v &rarr; M)</li>
-                            <li><strong>Four-Theory Comparison</strong>: Newtonian, GFD, MOND, and CDM on a single plot</li>
-                            <li><strong>Multi-Point Consistency</strong>: Per-point residuals, sigma deviations, and shape diagnostics</li>
-                            <li><strong>Observational Overlay</strong>: Published kinematic data with 1&sigma; error bars for direct validation</li>
-                            <li><strong>Data Provenance</strong>: Full mass model, observational data, and literature references for each galaxy</li>
-                            <li><strong>Ten Galaxies</strong>: Milky Way, Andromeda, M33, NGC 3198, NGC 2403, NGC 6503, UGC 2885, IC 2574, DDO 154, NGC 3109</li>
-                            <li><strong>REST API</strong>: Programmatic access to all computations</li>
-                            <li><strong>373 Unit Tests</strong>: Full test coverage of physics engine, inference pipeline, and API</li>
-                        </ul>
-                    </div>
-
-                    <div class="about-card">
-                        <h2>Source Code</h2>
-                        <p class="about-repo-url"><a href="https://github.com/fielddynamics/gravis" target="_blank" rel="noopener noreferrer">github.com/fielddynamics/gravis</a></p>
-                    </div>
-
-                    <div class="about-card">
-                        <h2>Citation</h2>
-                        <div class="about-citation">
-                            <p><strong>Software:</strong><br>
-                            Nelson, S. (2026). GRAVIS: Galactic Rotation from Field Dynamics.<br>
-                            <a href="https://github.com/fielddynamics/gravis" target="_blank" rel="noopener noreferrer">https://github.com/fielddynamics/gravis</a></p>
-                            <p><strong>Theory:</strong><br>
-                            Nelson, S. (2026). "Dual Tetrad Topology and the Field Origin: From Nuclear Decay to Galactic Dynamics."</p>
-                        </div>
-                    </div>
-
-                    <div class="about-card">
-                        <h2>References</h2>
-                        <ul class="about-references">
-                            <li>Milgrom, M. (1983). A modification of the Newtonian dynamics as a possible alternative to the hidden mass hypothesis. <em>ApJ</em> 270, 365.</li>
-                            <li>Bekenstein, J. &amp; Milgrom, M. (1984). Does the missing mass problem signal the breakdown of Newtonian gravity? <em>ApJ</em> 286, 7.</li>
-                            <li>McGaugh, S. S. (2011). Novel test of modified Newtonian dynamics with gas rich galaxies. <em>PRL</em> 106, 121303.</li>
-                            <li>Hassan, S. F. &amp; Rosen, R. A. (2012). Bimetric gravity from ghost-free massive gravity. <em>JHEP</em> 02, 126.</li>
-                            <li>Lelli, F., McGaugh, S. S. &amp; Schombert, J. M. (2016). SPARC: Mass models for 175 disk galaxies. <em>AJ</em> 152, 157.</li>
-                            <li>Lelli, F., McGaugh, S. S., Schombert, J. M. &amp; Pawlowski, M. S. (2017). One law to rule them all: The radial acceleration relation. <em>ApJ</em> 836, 152.</li>
-                        </ul>
-                    </div>
-
-                    <div class="about-footer">
-                        <p>Stephen Nelson &middot; Independent Researcher &middot; ORCID 0009-0008-6190-3269</p>
-                    </div>
+                    <p>Below a characteristic acceleration scale, the field can no longer sustain full coupling across all k<sup>2</sup> = 16 channels. It enters partial coupling, and the effective gravitational response is enhanced. This is field dynamics: the internal structure of the gravitational field governing its own strength.</p>
                 </div>
             </div>
         </div>

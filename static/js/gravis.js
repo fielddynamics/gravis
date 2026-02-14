@@ -2222,6 +2222,21 @@ function navigateToScreen(screenName) {
     if (screenName === 'analysis') {
         setTimeout(() => chart.resize(), 100);
     }
+
+    // Lazy-load the stellated octahedron iframe only when Field screen is active,
+    // and unload it when navigating away to stop the Three.js render loop.
+    var fieldIframe = document.getElementById('field-iframe');
+    if (fieldIframe) {
+        if (screenName === 'field') {
+            if (!fieldIframe.src || fieldIframe.src === 'about:blank') {
+                fieldIframe.src = fieldIframe.getAttribute('data-src');
+            }
+        } else {
+            if (fieldIframe.src && fieldIframe.src !== 'about:blank') {
+                fieldIframe.src = 'about:blank';
+            }
+        }
+    }
 }
 
 window.addEventListener('hashchange', () => {
