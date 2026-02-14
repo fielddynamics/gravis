@@ -7,6 +7,7 @@ Endpoints:
   POST /api/rotation-curve       - compute rotation curves for given parameters
   POST /api/infer-mass           - infer mass from observed velocity
   POST /api/infer-mass-model     - infer scaled mass model from observation + shape
+  POST /api/infer-mass-multi     - multi-point inference consistency analysis
 """
 
 import math
@@ -229,6 +230,122 @@ def infer_mass_model_endpoint():
         "log10_total": round(math.log10(max(inferred_total, 1.0)), 4),
         "btfr_mass": round(btfr_mass, 2),
         "log10_btfr": round(math.log10(max(btfr_mass, 1.0)), 4),
+    })
+
+
+@api.route("/infer-mass-multi", methods=["POST"])
+def infer_mass_multi_endpoint():
+    """
+    Infer total baryonic mass from multiple (r, v) observation points.
+
+    For each point, infers the total mass using the mass model shape,
+    then reports per-point results and aggregate statistics.
+
+    Request JSON:
+    {
+        "observations": [{"r": 5, "v": 236}, {"r": 8, "v": 230}, ...],
+        "accel_ratio": 1.0,
+        "mass_model": { ... }
+    }
+
+    Response includes per-point inferred totals plus mean, std, and
+    reduced chi-squared of the consistency across radii.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    observations = data.get("observations", [])
+    accel_ratio = data.get("accel_ratio", 1.0)
+    mass_model = data.get("mass_model")
+
+    if not mass_model or not observations:
+        return jsonify({"error": "mass_model and observations are required"}), 400
+
+    results = []
+    totals = []
+    weights = []
+
+    m_total_current = total_mass(mass_model)
+    if m_total_current <= 0:
+        return jsonify({"error": "Mass model has zero total mass"}), 400
+
+    for obs in observations:
+        r_kpc = obs.get("r", 0)
+        v_km_s = obs.get("v", 0)
+        err = obs.get("err", 0)
+        if r_kpc <= 0 or v_km_s <= 0:
+            continue
+
+        # Infer enclosed mass from this (r, v) point
+        m_enclosed_needed = infer_mass(r_kpc, v_km_s, accel_ratio)
+
+        # Compute scale factor relative to the mass model shape
+        m_enclosed_current = enclosed_mass(r_kpc, mass_model)
+
+        if m_enclosed_current <= 0:
+            continue
+
+        scale = m_enclosed_needed / m_enclosed_current
+        inferred_total = m_total_current * scale
+
+        # Enclosed fraction: how much of the model mass is within this radius
+        # Higher fractions = more reliable total mass estimate
+        enc_frac = m_enclosed_current / m_total_current
+
+        results.append({
+            "r_kpc": r_kpc,
+            "v_km_s": v_km_s,
+            "err": err,
+            "inferred_total": round(inferred_total, 2),
+            "log10_total": round(math.log10(max(inferred_total, 1.0)), 4),
+            "enclosed_frac": round(enc_frac, 4),
+        })
+        totals.append(inferred_total)
+        weights.append(enc_frac)
+
+    if len(totals) < 2:
+        return jsonify({"error": "Need at least 2 valid observation points"}), 400
+
+    n = len(totals)
+
+    # Unweighted statistics
+    mean_total = sum(totals) / n
+    variance = sum((t - mean_total) ** 2 for t in totals) / (n - 1)
+    std_total = math.sqrt(variance)
+    cv = (std_total / mean_total) * 100.0 if mean_total > 0 else 0.0
+
+    # Weighted statistics (weight = enclosed mass fraction)
+    # Points where more of the galaxy's mass is enclosed are more
+    # reliable estimators of the total mass.
+    w_sum = sum(weights)
+    if w_sum > 0:
+        w_mean = sum(t * w for t, w in zip(totals, weights)) / w_sum
+        # Weighted sample variance (reliability weights)
+        w_sum2 = sum(w * w for w in weights)
+        if w_sum * w_sum - w_sum2 > 0:
+            w_var = (w_sum / (w_sum * w_sum - w_sum2)) * \
+                    sum(w * (t - w_mean) ** 2 for t, w in zip(totals, weights))
+            w_std = math.sqrt(max(w_var, 0))
+        else:
+            w_std = 0.0
+        w_cv = (w_std / w_mean) * 100.0 if w_mean > 0 else 0.0
+    else:
+        w_mean = mean_total
+        w_std = std_total
+        w_cv = cv
+
+    return jsonify({
+        "points": results,
+        "n_points": n,
+        "mean_total": round(mean_total, 2),
+        "std_total": round(std_total, 2),
+        "log10_mean": round(math.log10(max(mean_total, 1.0)), 4),
+        "cv_percent": round(cv, 2),
+        "weighted_mean": round(w_mean, 2),
+        "weighted_std": round(w_std, 2),
+        "log10_weighted_mean": round(math.log10(max(w_mean, 1.0)), 4),
+        "weighted_cv_percent": round(w_cv, 2),
     })
 
 

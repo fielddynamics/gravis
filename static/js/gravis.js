@@ -244,6 +244,41 @@ const chart = new Chart(ctx, {
                 pointRadius: 7,
                 pointStyle: 'line',
                 showLine: false
+            },
+            // Dataset 4: GFD confidence band upper edge (hidden from legend)
+            {
+                label: 'GFD +1\u03C3',
+                data: [],
+                borderColor: 'rgba(76, 175, 80, 0.35)',
+                backgroundColor: 'rgba(76, 175, 80, 0.12)',
+                borderWidth: 1,
+                borderDash: [4, 4],
+                tension: 0.4,
+                pointRadius: 0,
+                fill: {target: 5, above: 'rgba(76, 175, 80, 0.12)', below: 'rgba(76, 175, 80, 0.12)'}
+            },
+            // Dataset 5: GFD confidence band lower edge (hidden from legend)
+            {
+                label: 'GFD -1\u03C3',
+                data: [],
+                borderColor: 'rgba(76, 175, 80, 0.35)',
+                backgroundColor: 'transparent',
+                borderWidth: 1,
+                borderDash: [4, 4],
+                tension: 0.4,
+                pointRadius: 0,
+                fill: false
+            },
+            // Dataset 6: Inference markers (green diamonds)
+            {
+                label: 'GFD Inference',
+                data: [],
+                borderColor: '#4caf50',
+                backgroundColor: 'rgba(76, 175, 80, 0.7)',
+                borderWidth: 2,
+                pointRadius: 6,
+                pointStyle: 'rectRot',
+                showLine: false
             }
         ]
     },
@@ -261,7 +296,17 @@ const chart = new Chart(ctx, {
                     padding: 15,
                     usePointStyle: true,
                     boxWidth: 40,
-                    boxHeight: 3
+                    boxHeight: 3,
+                    filter: function(item, chartData) {
+                        // Hide confidence band datasets from legend
+                        if (item.datasetIndex === 4 || item.datasetIndex === 5) return false;
+                        // Hide inference markers from legend when no data
+                        if (item.datasetIndex === 6) {
+                            var ds = chartData.datasets[6];
+                            return ds && ds.data && ds.data.length > 0;
+                        }
+                        return true;
+                    }
                 }
             },
             title: {
@@ -274,6 +319,25 @@ const chart = new Chart(ctx, {
             tooltip: {
                 callbacks: {
                     label: function(context) {
+                        // Inference markers (dataset 6): rich tooltip
+                        if (context.datasetIndex === 6 && context.raw && context.raw.meta) {
+                            var m = context.raw.meta;
+                            var lines = [];
+                            lines.push('GFD Inference: ' + context.parsed.y.toFixed(1) + ' km/s');
+                            if (m.obs_v !== undefined) {
+                                lines.push('Observed: ' + m.obs_v.toFixed(1) + ' km/s');
+                                var delta_v = context.parsed.y - m.obs_v;
+                                lines.push('Residual: ' + (delta_v >= 0 ? '+' : '') + delta_v.toFixed(1) + ' km/s');
+                            }
+                            lines.push('Inferred Mass: 10^' + m.log10_total.toFixed(2) + ' M_sun');
+                            lines.push('Enclosed: ' + (m.enclosed_frac * 100).toFixed(0) + '%');
+                            lines.push('vs GFD prediction: ' + (m.deviation >= 0 ? '+' : '') + m.deviation.toFixed(1) + '%');
+                            return lines;
+                        }
+                        // Confidence band datasets: suppress tooltip
+                        if (context.datasetIndex === 4 || context.datasetIndex === 5) {
+                            return null;
+                        }
                         let label = context.dataset.label || '';
                         if (label) label += ': ';
                         if (context.parsed.y !== null) {
@@ -394,6 +458,326 @@ async function fetchGalaxies() {
     return resp.json();
 }
 
+async function fetchMultiPointInference(observations, accelRatio, massModel) {
+    const resp = await fetch('/api/infer-mass-multi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            observations: observations,
+            accel_ratio: accelRatio,
+            mass_model: massModel
+        })
+    });
+    if (!resp.ok) return null;
+    return resp.json();
+}
+
+/**
+ * Find the prediction counterpart for an inference galaxy and return
+ * its observations array, or null if none available.
+ */
+function getPredictionObservations(inferenceGalaxy) {
+    if (!inferenceGalaxy) return null;
+    var baseId = inferenceGalaxy.id.replace(/_inference$/, '');
+    if (baseId === 'mw') baseId = 'milky_way';
+    var predictions = galaxyCatalog.prediction || [];
+    for (var i = 0; i < predictions.length; i++) {
+        if (predictions[i].id === baseId && predictions[i].observations) {
+            return predictions[i].observations;
+        }
+    }
+    return null;
+}
+
+// =====================================================================
+// MULTI-POINT INFERENCE ANALYSIS
+// =====================================================================
+
+/**
+ * Scale a mass model by a factor (multiply all component masses).
+ */
+function scaleMassModel(model, factor) {
+    var scaled = {};
+    var comps = ['bulge', 'disk', 'gas'];
+    for (var c = 0; c < comps.length; c++) {
+        var key = comps[c];
+        if (model[key]) {
+            scaled[key] = {};
+            for (var prop in model[key]) {
+                scaled[key][prop] = model[key][prop];
+            }
+            if (scaled[key].M) scaled[key].M *= factor;
+        }
+    }
+    return scaled;
+}
+
+/**
+ * Interpolate the GFD curve (dataset 1) to get velocity at a given radius.
+ */
+function interpolateGFDVelocity(radius) {
+    var data = chart.data.datasets[1].data;
+    if (!data || data.length === 0) return null;
+    // Find bracketing points
+    for (var i = 1; i < data.length; i++) {
+        if (data[i].x >= radius) {
+            var x0 = data[i-1].x, y0 = data[i-1].y;
+            var x1 = data[i].x, y1 = data[i].y;
+            if (x1 === x0) return y0;
+            var t = (radius - x0) / (x1 - x0);
+            return y0 + t * (y1 - y0);
+        }
+    }
+    // Beyond curve range
+    return data[data.length - 1].y;
+}
+
+async function runMultiPointInference(accelRatio, massModel) {
+    var multiDiv = document.getElementById('multi-inference-result');
+    var multiBody = document.getElementById('multi-inference-body');
+    if (!multiDiv || !multiBody) return;
+
+    // Only run when an inference example is loaded
+    if (!currentExample || currentMode !== 'inference') {
+        multiDiv.style.display = 'none';
+        clearInferenceChart();
+        return;
+    }
+
+    var observations = getPredictionObservations(currentExample);
+    if (!observations || observations.length < 2) {
+        multiDiv.style.display = 'none';
+        clearInferenceChart();
+        return;
+    }
+
+    try {
+        var result = await fetchMultiPointInference(observations, accelRatio, massModel);
+        if (!result || !result.points) {
+            multiDiv.style.display = 'none';
+            clearInferenceChart();
+            return;
+        }
+
+        // Use weighted statistics (weighted by enclosed mass fraction)
+        var wMean = result.weighted_mean;
+        var wStd = result.weighted_std;
+        var wCv = result.weighted_cv_percent;
+        var wExp = Math.floor(Math.log10(wMean));
+        var wCoeff = wMean / Math.pow(10, wExp);
+        var wStdCoeff = wStd / Math.pow(10, wExp);
+
+        // ----------------------------------------------------------
+        // CHART: Confidence band centered on GFD curve
+        // ----------------------------------------------------------
+        // Band width = weighted RMS deviation of per-point inferred masses
+        // from the anchor mass, weighted by enclosed fraction. This captures
+        // both scatter and systematic offset while suppressing unreliable
+        // inner-point extrapolations. Scientifically justified: weight =
+        // enclosed fraction is a direct measure of how much information
+        // each observation carries about the total mass.
+        var modelTotal = 0;
+        var comps = ['bulge', 'disk', 'gas'];
+        for (var c = 0; c < comps.length; c++) {
+            if (massModel[comps[c]] && massModel[comps[c]].M) {
+                modelTotal += massModel[comps[c]].M;
+            }
+        }
+
+        // Weighted RMS of per-point inferred masses relative to the anchor.
+        // Weight = enclosed mass fraction at each radius. This is not an
+        // arbitrary choice: it measures how much information each observation
+        // carries about the total mass. A point at r where 80% of the mass
+        // is enclosed constrains the total far better than one at r where
+        // only 5% is enclosed (which is dominated by mass model shape).
+        var wSumSqDev = 0;
+        var wSumWeights = 0;
+        for (var i = 0; i < result.points.length; i++) {
+            var w = result.points[i].enclosed_frac;
+            var diff = result.points[i].inferred_total - modelTotal;
+            wSumSqDev += w * diff * diff;
+            wSumWeights += w;
+        }
+        var rmsFromAnchor = wSumWeights > 0
+            ? Math.sqrt(wSumSqDev / wSumWeights)
+            : 0;
+
+        if (modelTotal > 0 && rmsFromAnchor > 0) {
+            var scaleHigh = (modelTotal + rmsFromAnchor) / modelTotal;
+            var scaleLow = Math.max(0.01, (modelTotal - rmsFromAnchor) / modelTotal);
+            var modelHigh = scaleMassModel(massModel, scaleHigh);
+            var modelLow = scaleMassModel(massModel, scaleLow);
+
+            // Extend chart range to cover all observations
+            var chartMaxR = parseFloat(distanceSlider.value);
+            var maxObsR = Math.max.apply(null, observations.map(function(o) { return o.r; }));
+            chartMaxR = Math.max(chartMaxR, maxObsR * 1.15);
+
+            // Fetch upper and lower band curves in parallel
+            var bandPromises = [
+                fetchRotationCurve(chartMaxR, accelRatio, modelHigh),
+                fetchRotationCurve(chartMaxR, accelRatio, modelLow)
+            ];
+            var bandResults = await Promise.all(bandPromises);
+            var bandHigh = bandResults[0];
+            var bandLow = bandResults[1];
+
+            // Populate band datasets
+            var upperData = [];
+            var lowerData = [];
+            for (var i = 0; i < bandHigh.radii.length; i++) {
+                upperData.push({x: bandHigh.radii[i], y: bandHigh.dtg[i]});
+            }
+            for (var i = 0; i < bandLow.radii.length; i++) {
+                lowerData.push({x: bandLow.radii[i], y: bandLow.dtg[i]});
+            }
+            chart.data.datasets[4].data = upperData;
+            chart.data.datasets[5].data = lowerData;
+        } else {
+            chart.data.datasets[4].data = [];
+            chart.data.datasets[5].data = [];
+        }
+
+        // ----------------------------------------------------------
+        // CHART: Green inference markers
+        // ----------------------------------------------------------
+        var markerData = [];
+        for (var i = 0; i < result.points.length; i++) {
+            var pt = result.points[i];
+            // Interpolate the GFD curve at this observation radius
+            var gfdV = interpolateGFDVelocity(pt.r_kpc);
+            if (gfdV === null) continue;
+            // Deviation from GFD anchor mass, not multi-point mean
+            var deviation = ((pt.inferred_total - modelTotal) / modelTotal) * 100;
+            markerData.push({
+                x: pt.r_kpc,
+                y: gfdV,
+                meta: {
+                    obs_v: pt.v_km_s,
+                    err: pt.err,
+                    inferred_total: pt.inferred_total,
+                    log10_total: pt.log10_total,
+                    enclosed_frac: pt.enclosed_frac,
+                    deviation: deviation
+                }
+            });
+        }
+        chart.data.datasets[6].data = markerData;
+
+        chart.update('none');
+
+        // ----------------------------------------------------------
+        // SIDEBAR: Statistics and per-point table
+        // ----------------------------------------------------------
+        var html = '';
+
+        // GFD prediction mass (the anchor)
+        var anchorExp = Math.floor(Math.log10(modelTotal));
+        var anchorCoeff = modelTotal / Math.pow(10, anchorExp);
+
+        // Observational spread (RMS from anchor)
+        var rmsExp = Math.floor(Math.log10(Math.max(rmsFromAnchor, 1)));
+        var rmsCoeff = rmsFromAnchor / Math.pow(10, anchorExp);
+
+        // Summary line
+        html += '<div style="margin-bottom: 10px; line-height: 1.5;">';
+        html += 'Mass inferred independently at <strong style="color:#e0e0e0;">';
+        html += result.n_points + '</strong> observed radii. ';
+        html += '<span style="color:#4caf50;">Green band</span> = observational spread around GFD prediction. ';
+        html += '<span style="color:#4caf50;">Diamonds</span> on curve show GFD velocity at each radius; hover for details.';
+        html += '</div>';
+
+        // GFD prediction (anchor mass)
+        html += '<div style="margin-bottom: 6px;">';
+        html += '<strong style="color:#e0e0e0;">GFD Prediction:</strong> ';
+        html += '<span style="color:#4da6ff;">' + anchorCoeff.toFixed(2);
+        html += ' \u00D7 10' + superscript(anchorExp) + ' M\u2609</span>';
+        html += '</div>';
+
+        // Observational inference (weighted mean)
+        html += '<div style="margin-bottom: 6px;">';
+        html += '<strong style="color:#e0e0e0;">Observational Mean:</strong> ';
+        html += '<span style="color:#e0e0e0;">' + wCoeff.toFixed(2) + ' \u00B1 ' + wStdCoeff.toFixed(2);
+        html += ' \u00D7 10' + superscript(wExp) + ' M\u2609</span>';
+        html += ' <span style="font-size:0.85em; color:#808080;">(weighted by enclosed fraction)</span>';
+        html += '</div>';
+
+        // Band width (weighted RMS spread)
+        html += '<div style="margin-bottom: 6px;">';
+        html += '<strong style="color:#e0e0e0;">Band (\u00B11\u03C3 weighted):</strong> ';
+        html += '<span style="color:#4caf50;">\u00B1 ' + rmsCoeff.toFixed(2);
+        html += ' \u00D7 10' + superscript(anchorExp) + ' M\u2609</span>';
+        html += '</div>';
+
+        // Agreement metric: how close is the observational mean to the GFD prediction
+        var agreementPct = Math.abs(wMean - modelTotal) / modelTotal * 100;
+        html += '<div style="margin-bottom: 10px;">';
+        html += '<strong style="color:#e0e0e0;">Prediction-Observation Offset:</strong> ';
+        var agColor = agreementPct < 10 ? '#4caf50' : agreementPct < 30 ? '#ffa726' : '#ef5350';
+        var agSign = wMean < modelTotal ? '-' : '+';
+        html += '<span style="color:' + agColor + ';">' + agSign + agreementPct.toFixed(1) + '%</span>';
+        html += '</div>';
+
+        // Per-point table -- deviation from GFD prediction (anchor mass)
+        html += '<table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:0.85em;">';
+        html += '<tr style="border-bottom:1px solid #404040; color:#808080;">';
+        html += '<th style="text-align:left; padding:4px 6px;">r (kpc)</th>';
+        html += '<th style="text-align:left; padding:4px 6px;">v (km/s)</th>';
+        html += '<th style="text-align:right; padding:4px 6px;">log10(M)</th>';
+        html += '<th style="text-align:right; padding:4px 6px;">Enc.</th>';
+        html += '<th style="text-align:right; padding:4px 6px;">vs GFD</th>';
+        html += '</tr>';
+
+        for (var i = 0; i < result.points.length; i++) {
+            var pt = result.points[i];
+            // Deviation from the GFD anchor mass, not the multi-point mean
+            var deviation = ((pt.inferred_total - modelTotal) / modelTotal) * 100;
+            var devColor = Math.abs(deviation) < 10 ? '#4caf50' : Math.abs(deviation) < 25 ? '#ffa726' : '#ef5350';
+            var errStr = pt.err ? ' \u00B1 ' + pt.err : '';
+            var encPct = (pt.enclosed_frac * 100).toFixed(0);
+            // Dim rows with very low enclosed fraction (unreliable)
+            var rowOpacity = pt.enclosed_frac < 0.1 ? 'opacity: 0.5;' : '';
+            html += '<tr style="border-bottom:1px solid #2a2a2a; ' + rowOpacity + '">';
+            html += '<td style="padding:3px 6px; color:#e0e0e0;">' + pt.r_kpc + '</td>';
+            html += '<td style="padding:3px 6px; color:#e0e0e0;">' + pt.v_km_s + errStr + '</td>';
+            html += '<td style="text-align:right; padding:3px 6px; color:#b0b0b0;">' + pt.log10_total.toFixed(2) + '</td>';
+            html += '<td style="text-align:right; padding:3px 6px; color:#808080;">' + encPct + '%</td>';
+            html += '<td style="text-align:right; padding:3px 6px; color:' + devColor + ';">' + (deviation >= 0 ? '+' : '') + deviation.toFixed(1) + '%</td>';
+            html += '</tr>';
+        }
+        html += '</table>';
+
+        // Legend
+        html += '<div style="margin-top: 8px; font-size: 0.8em; color: #606060;">';
+        html += 'Enc. = model mass enclosed at radius. ';
+        html += 'vs GFD = deviation of inferred mass from GFD prediction. ';
+        html += 'Band = \u00B11\u03C3 weighted spread (by enclosed fraction) around GFD curve.';
+        html += '</div>';
+
+        multiBody.innerHTML = html;
+        multiDiv.style.display = 'block';
+
+    } catch (err) {
+        console.error('Multi-point inference error:', err);
+        multiDiv.style.display = 'none';
+        clearInferenceChart();
+    }
+}
+
+/**
+ * Clear inference-specific chart elements (band + markers).
+ */
+function clearInferenceChart() {
+    if (chart.data.datasets.length > 4) {
+        chart.data.datasets[4].data = [];
+        chart.data.datasets[5].data = [];
+    }
+    if (chart.data.datasets.length > 6) {
+        chart.data.datasets[6].data = [];
+    }
+    chart.update('none');
+}
+
 // =====================================================================
 // CHART UPDATE (calls API)
 // =====================================================================
@@ -450,12 +834,28 @@ async function updateChart() {
 
             // Compute full rotation curve with the inferred distributed model
             const curveModel = scaledModel || shapeModel;
-            const data = await fetchRotationCurve(maxRadius, accelRatio, curveModel);
+
+            // Extend chart range to cover all observed data if available
+            var chartMaxR = maxRadius;
+            var predObs = currentExample ? getPredictionObservations(currentExample) : null;
+            if (predObs && predObs.length > 0) {
+                var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
+                chartMaxR = Math.max(chartMaxR, maxObsR * 1.15);
+            }
+
+            const data = await fetchRotationCurve(chartMaxR, accelRatio, curveModel);
             renderCurves(data);
 
-            // Show observation point only when an example is loaded
+            // Show observation points when an example is loaded
             if (currentExample) {
-                chart.data.datasets[3].data = [{x: r_obs, y: v_obs}];
+                // If prediction counterpart has full observations, show them all
+                if (predObs && predObs.length > 0) {
+                    chart.data.datasets[3].data = predObs.map(function(obs) {
+                        return {x: obs.r, y: obs.v, err: obs.err || 0};
+                    });
+                } else {
+                    chart.data.datasets[3].data = [{x: r_obs, y: v_obs}];
+                }
                 chart.data.datasets[3].hidden = false;
                 observedLegend.style.display = 'flex';
             } else {
@@ -463,6 +863,10 @@ async function updateChart() {
                 chart.data.datasets[3].hidden = true;
                 observedLegend.style.display = 'none';
             }
+
+            // Multi-point consistency analysis (fire-and-forget, updates chart independently)
+            runMultiPointInference(accelRatio, curveModel);
+
         } catch (err) {
             console.error('Inference API error:', err);
         }
@@ -584,6 +988,7 @@ function loadExample() {
 
     chart.data.datasets[3].data = [];
     chart.data.datasets[3].hidden = true;
+    clearInferenceChart();
 
     currentExample = example;
 
@@ -597,8 +1002,13 @@ function loadExample() {
     }
 
     // Set zoom limits based on observational data or distance
-    if (example.observations && example.observations.length > 0) {
-        const obsRadii = example.observations.map(obs => obs.r);
+    // For inference mode, use prediction counterpart's observations if available
+    var obsData = example.observations;
+    if (!obsData && currentMode === 'inference') {
+        obsData = getPredictionObservations(example);
+    }
+    if (obsData && obsData.length > 0) {
+        const obsRadii = obsData.map(obs => obs.r);
         const minR = Math.min(...obsRadii);
         const maxR = Math.max(...obsRadii);
         const range = maxR - minR;
@@ -644,6 +1054,10 @@ function setMode(mode) {
         inferenceResult.classList.remove('visible');
         document.getElementById('mass-model-section').style.display = '';
         document.getElementById('mass-slider-group').style.display = 'none';
+        // Hide multi-point panel and chart overlays in prediction mode
+        var multiDiv = document.getElementById('multi-inference-result');
+        if (multiDiv) multiDiv.style.display = 'none';
+        clearInferenceChart();
         // In prediction mode, mass sliders are directly editable
         setMassSliderEditable(true);
         // Update header text
