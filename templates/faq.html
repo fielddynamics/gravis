@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}GRAVIS: FAQ{% endblock %}
+
+{% block content %}
+    <div class="screen active" id="screen-faq" style="display: flex; flex: 1; overflow: hidden;">
+        <div class="faq-screen">
+            <div class="faq-header">
+                <h1 class="faq-title">Frequently Asked Questions</h1>
+                <p class="faq-subtitle">Search or browse questions about GRAVIS and Gravity Field Dynamics</p>
+                <div class="faq-search-wrapper">
+                    <input type="text" id="faq-search" class="faq-search" placeholder="Search questions..." autocomplete="off">
+                    <span class="faq-search-icon"></span>
+                    <span class="faq-search-clear" id="faq-search-clear" style="display:none;">&#x2715;</span>
+                </div>
+                <div class="faq-controls">
+                    <button class="faq-expand-btn" id="faq-expand-all" onclick="toggleAllFaq(true)">Expand All</button>
+                    <button class="faq-expand-btn" id="faq-collapse-all" onclick="toggleAllFaq(false)">Collapse All</button>
+                    <span class="faq-result-count" id="faq-result-count"></span>
+                </div>
+            </div>
+            <div class="faq-content" id="faq-content">
+                <!-- FAQ items injected by faq.js -->
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/faq.js') }}"></script>
+{% endblock %}

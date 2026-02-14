@@ -3142,8 +3142,8 @@ Browser Support:
             `;
             document.head.appendChild(style);
 
-            // Always in landing mode
-            const isLandingMode = true;
+            // Landing mode only when running standalone (not inside an iframe)
+            const isLandingMode = (window === window.parent);
             // =====================================================================
             // PREFLIGHT VALIDATION: Verify Pi Base-8 Digits
             // Critical for correct Field Closure traversal

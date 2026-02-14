@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}GRAVIS{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/gravis.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body style="display: flex; flex-direction: column; height: 100vh; overflow: hidden;">
+    {% block before_nav %}{% endblock %}
+    <nav class="nav-bar">
+        <a class="nav-logo" href="/" style="text-decoration: none;">GRAVIS</a>
+        <div class="nav-items">
+            <a class="nav-item {% if active_page == 'analysis' %}active{% endif %}" href="/" style="text-decoration: none;">Analysis</a>
+            <a class="nav-item {% if active_page == 'about' %}active{% endif %}" href="/about" style="text-decoration: none;">About</a>
+            <a class="nav-item {% if active_page == 'field' %}active{% endif %}" href="/field" style="text-decoration: none;">Field</a>
+            <a class="nav-item nav-item-right {% if active_page == 'faq' %}active{% endif %}" href="/faq" style="text-decoration: none;">FAQ</a>
+        </div>
+    </nav>
+    {% block content %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>

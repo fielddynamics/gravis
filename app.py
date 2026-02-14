@@ -2,7 +2,7 @@
 GRAVIS - GRAvity VISion
 Flask application factory.
 
-Serves the frontend (Jinja2 template + static assets) and the REST API
+Serves the frontend (Jinja2 templates + static assets) and the REST API
 for computing rotation curves with Dual Tetrad Gravity.
 
 Usage:
@@ -30,20 +30,30 @@ def create_app():
     def splash():
         return render_template("splash.html")
 
-    # Stellated octahedron Three.js page (served in iframe)
+    # Analysis page (main app with Chart.js and heavy scripts)
+    @app.route("/")
+    def index():
+        return render_template("analysis.html", active_page="analysis")
+
+    # About page (prose only, no heavy JS)
+    @app.route("/about")
+    def about():
+        return render_template("about.html", active_page="about")
+
+    # Field page (prose + stellated octahedron iframe)
+    @app.route("/field")
+    def field():
+        return render_template("field.html", active_page="field")
+
+    # FAQ page (lightweight JS for search/filter)
+    @app.route("/faq")
+    def faq():
+        return render_template("faq.html", active_page="faq")
+
+    # Stellated octahedron Three.js page (served inside iframe on /field)
     @app.route("/stellated-octahedron")
     def stellated_octahedron():
         return render_template("stellated_octahedron.html")
-
-    # Field page (standalone, isolates Three.js from the main app)
-    @app.route("/field")
-    def field():
-        return render_template("field.html")
-
-    # Serve the main page
-    @app.route("/")
-    def index():
-        return render_template("index.html")
 
     return app
 

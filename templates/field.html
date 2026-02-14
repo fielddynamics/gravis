@@ -1,23 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GRAVIS: The Gravitational Field</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/gravis.css') }}">
-</head>
-<body style="display: flex; flex-direction: column; height: 100vh; overflow: hidden;">
-    <!-- Top Navigation Bar -->
-    <nav class="nav-bar">
-        <a class="nav-logo" href="/" style="text-decoration: none;">GRAVIS</a>
-        <div class="nav-items">
-            <a class="nav-item" href="/#analysis" style="text-decoration: none;">Analysis</a>
-            <a class="nav-item" href="/#about" style="text-decoration: none;">About</a>
-            <a class="nav-item active" href="/field" style="text-decoration: none;">Field</a>
-            <a class="nav-item nav-item-right" href="/#faq" style="text-decoration: none;">FAQ</a>
-        </div>
-    </nav>
+{% extends "base.html" %}
 
+{% block title %}GRAVIS: The Gravitational Field{% endblock %}
+
+{% block content %}
     <div class="prose-screen" style="flex: 1; overflow-y: auto;">
         <div class="prose">
             <h1>The Gravitational Field</h1>
@@ -48,5 +33,4 @@
             <p>Below a characteristic acceleration scale, the field can no longer sustain full coupling across all k<sup>2</sup> = 16 channels. It enters partial coupling, and the effective gravitational response is enhanced. This is field dynamics: the internal structure of the gravitational field governing its own strength.</p>
         </div>
     </div>
-</body>
-</html>
+{% endblock %}
