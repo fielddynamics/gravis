@@ -40,7 +40,7 @@ def create_app():
     def about():
         return render_template("about.html", active_page="about")
 
-    # Field page (prose + stellated octahedron iframe)
+    # Field page (prose + inline Three.js stellated octahedron)
     @app.route("/field")
     def field():
         return render_template("field.html", active_page="field")
@@ -49,11 +49,6 @@ def create_app():
     @app.route("/faq")
     def faq():
         return render_template("faq.html", active_page="faq")
-
-    # Stellated octahedron Three.js page (served inside iframe on /field)
-    @app.route("/stellated-octahedron")
-    def stellated_octahedron():
-        return render_template("stellated_octahedron.html")
 
     return app
 

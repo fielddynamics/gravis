@@ -2,35 +2,322 @@
 
 {% block title %}GRAVIS: The Gravitational Field{% endblock %}
 
+{% block head %}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+{% endblock %}
+
 {% block content %}
     <div class="prose-screen" style="flex: 1; overflow-y: auto;">
         <div class="prose">
-            <h1>The Gravitational Field</h1>
-            <p class="prose-subtitle">Visualizing the internal structure of gravity</p>
+            <h1>Exploring the Gravity Field</h1>
+            <p class="prose-subtitle">A guided introduction to the internal structure of gravity</p>
 
-            <p>Gravity has structure. At every point in spacetime, the gravitational field can be described by a set of four basis vectors called a tetrad. These four vectors define directions and scales at that point, and together they form a tetrahedron: a four-faced solid that is the simplest possible enclosed volume in three dimensions. In this framework, a single tetrahedron is the minimal gravitational field chamber.</p>
+            <!-- ============================================================
+                 BLOCK 1: GRAVITY IS A FIELD
+                 ============================================================ -->
 
-            <h2>From Neighbours to Chambers</h2>
+            <h2>Gravity Is a Field</h2>
 
-            <p>Consider one gravitational field point sitting in a lattice. In three-dimensional space, with simplex number k = 4, each field point has exactly 12 nearest neighbours. This is the same count that appears in close-packed crystal structures (face-centred cubic, hexagonal close-packed) and is a direct consequence of how four-dimensional simplices tile space. Twelve neighbours, arranged symmetrically around a center.</p>
+            <p>Gravity is a field. Not a force that reaches across empty space. Not a mysterious pull between distant objects. Gravity is a physical quantity, present at every point in spacetime, and it propagates. In September 2015, the LIGO observatory recorded this directly: a ripple in the gravity field, produced by two merging black holes over a billion light years away, arrived at Earth as a gravitational wave. Two years later, a neutron star collision confirmed that these waves travel at exactly the speed of light.</p>
 
-            <p>When these 12 neighbouring fields couple to the central point through standard field-theoretic interactions, the coupling pattern is not uniform. The neighbours partition into two groups of six, each group forming the vertices of an octahedron. But the coupling within each group is not octahedral. It is tetrahedral: within each group, the six pairwise interactions between four of the neighbours define a tetrahedron. The result is two tetrahedral field chambers, each built from the coupling of the central field to its neighbours. This is not imposed by hand. It follows from the geometry of field packing at k = 4.</p>
+            <p>This is the starting point. Gravity is a field, and disturbances in that field travel outward as waves, at the speed of light, through the structure of spacetime itself. But a field that carries waves cannot be a single undifferentiated whole. An ocean is not one enormous water molecule. It is a topology of water molecules, and it is precisely that topology, molecule coupled to molecule in a connected lattice, that allows a wave to propagate across it. The question that follows is the one this page is built to answer: if the gravity field carries waves, what is the topology of that field?</p>
+
+            <!-- ============================================================
+                 BLOCK 2: A FIELD THAT PROPAGATES NEEDS NEIGHBOURS
+                 ============================================================ -->
+
+            <h2>Field Propagation and Field Neighbours</h2>
+
+            <p>Consider how an ocean wave moves across open water. No single water molecule travels from shore to shore. Instead, each molecule pushes its immediate neighbours, and those neighbours push theirs, and the disturbance passes forward through a chain of local interactions. The wave exists because the water has structure: molecules arranged in proximity, each one coupled to the ones around it.</p>
+
+            <p>Gravitational waves work the same way. Each region of the gravity field influences its immediate neighbours through the geometric structure that general relativity requires. The disturbance passes from region to region, at the speed of light, across billions of light years. This is not metaphor. The wave equation that describes gravitational wave propagation contains a term called the Laplacian, and the Laplacian, by mathematical definition, computes the difference between a point and its surrounding neighbours. No neighbours, no Laplacian. No Laplacian, no wave equation. No wave equation, no gravitational waves.</p>
+
+            <p>LIGO detected gravitational waves. Therefore gravity has neighbours. Therefore the gravity field is not a single, monolithic entity. It is a topology: many locally coupled field regions, each one interacting with the ones adjacent to it, forming a connected structure that spans all of spacetime.</p>
+
+            <p>The gravity field has parts. And those parts have geometry.</p>
+
+            <!-- ============================================================
+                 BLOCK 3: HOW THE FIELDS ORGANIZE
+                 ============================================================ -->
+
+            <h2>Field Organisation: The k = 4 Topology</h2>
+
+            <p>If the gravity field is a topology of locally coupled regions, the next question is immediate: how are those regions organised? How many neighbours does each field region couple to? Is the arrangement random, or does it follow a rule?</p>
+
+            <p>It follows a rule. The number of field coupling faces per region is exactly four. This value, written as k = 4, is not chosen by convention or fitted to data. It is squeezed from both directions by independent constraints, one from pure geometry and one from direct observation.</p>
+
+            <p><strong>From geometry:</strong> in three spatial dimensions, the simplest possible shape that encloses a volume is a tetrahedron, a solid with exactly four triangular faces. This is the three-dimensional equivalent of a triangle being the simplest shape that encloses area in two dimensions. You cannot enclose a volume with fewer than four faces. Geometry itself sets the floor: k must be at least 4.</p>
+
+            <p><strong>From observation:</strong> LIGO measured exactly two polarisations of gravitational waves. The spacetime metric has ten independent components. With k coupling constraints and k gauge freedoms, the number of propagating degrees of freedom is 10 minus 2k. Only k = 4 yields exactly two, matching what LIGO observed. Any other value of k produces the wrong number of polarisations. Observation sets the ceiling: k cannot exceed 4.</p>
+
+            <p>The floor is 4. The ceiling is 4. The gravity field is k = 4 organised.</p>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="faq-question-text">The simplex theorem and the LIGO constraint</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </div>
+                <div class="faq-answer">
+                    <p><strong>The simplex theorem</strong> states that in d spatial dimensions, the minimum convex polytope that encloses volume has exactly d + 1 faces. For d = 3: the tetrahedron, with 4 faces. This is not a choice. Three dimensions force it.</p>
+                    <p><strong>The LIGO constraint</strong> works from the other direction. The symmetric metric tensor in (3+1) spacetime has 10 independent components. Each coupling face contributes one constraint and one gauge freedom, removing 2k components from the propagating count. The number of physical, propagating degrees of freedom is 10 &minus; 2k. LIGO measured exactly 2 tensor polarisations. Setting 10 &minus; 2k = 2 gives k = 4. If k = 3, there would be 4 polarisations (too many). If k = 5, there would be 0 (gravity could not propagate at all).</p>
+                </div>
+            </div>
+
+            <p>Each field region, then, couples to exactly four neighbours through four shared boundary faces. Four faces, arranged symmetrically around a center, form a tetrahedron. This tetrahedron is not an abstract mathematical convenience. It is the shape of a single gravity field region: the minimal enclosed volume in three dimensions. In the language of field dynamics, it is called a <strong>field chamber</strong>.</p>
+
+            <!-- ============================================================
+                 BLOCK 4: HOW BIG IS EACH FIELD?
+                 ============================================================ -->
+
+            <h2>The Size of a Gravity Field</h2>
+
+            <p>Every field region has a characteristic size. The electromagnetic field has its photon wavelength. The strong nuclear field operates within the radius of a proton. The gravity field is no different. Each field chamber, each tetrahedral region in the gravity field topology, has a definite physical scale.</p>
+
+            <p>That scale is 2.82 femtometres. One femtometre is 10<sup>&minus;15</sup> metres, roughly the diameter of a proton. The gravity field tile is on the same scale as the atomic nucleus. This number is known as the classical electron radius, and what makes it remarkable is that two completely independent lines of physics, using different constants, different equations, and different reasoning, both arrive at the same value.</p>
+
+            <p>The first route uses only electromagnetism: it calculates the radius at which the energy stored in the electron's electric field equals the electron's rest mass energy. No gravity involved. The second route uses only gravitational topology: it calculates the radius at which the tetrad's gravitational acceleration equals the cosmic acceleration threshold. No electromagnetism involved. Both routes converge on 2.82 femtometres, agreeing to within 0.2%.</p>
+
+            <p>When two independent domains of physics converge on the same scale, the scale is not a coincidence. It is telling you that the same underlying structure governs both. The gravity field tile and the electromagnetic field share a common characteristic length, because they are two aspects of the same topology.</p>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="faq-question-text">Deriving the tile size: two routes to r<sub>e</sub></span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </div>
+                <div class="faq-answer">
+                    <p><strong>Route 1 (electromagnetic stability):</strong> The classical electron radius is the distance at which the electrostatic self-energy of the electron equals its rest mass energy. The formula is r<sub>e</sub> = e<sup>2</sup> / (4&pi;&epsilon;<sub>0</sub> m<sub>e</sub> c<sup>2</sup>) = 2.818 &times; 10<sup>&minus;15</sup> m. This uses only electromagnetism and special relativity.</p>
+                    <p><strong>Route 2 (gravitational topology):</strong> The tile size can also be recovered from the tetrahedral coupling structure. Using the gravitational acceleration at the field boundary and the cosmic acceleration scale a<sub>0</sub>: r<sub>e</sub> = k &radic;(G m<sub>e</sub> / a<sub>0</sub>) = 2.82 &times; 10<sup>&minus;15</sup> m, where k = 4. This uses gravity, cosmology, and topology. No electromagnetism.</p>
+                    <p>The two routes agree to <strong>0.21%</strong>.</p>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 BLOCK 5: WHY TWO FIELD CHAMBERS?
+                 ============================================================ -->
+
+            <h2>Two Field Chambers, Not One</h2>
+
+            <p>A single tetrahedral field chamber is not self-consistent. It has a preferred direction: the apex of the tetrahedron points somewhere, and that somewhere breaks the symmetry. A gravity field with a built-in preferred direction would produce instabilities, specifically a ghost mode, a fluctuation with negative kinetic energy that would cause the field to radiate energy without limit.</p>
+
+            <p>The resolution comes from a second field chamber: a second tetrahedron, oriented in the opposite direction, sharing the same center. Where the first tetrahedron points up, the second points down. Where the first has an apex, the second has a base. The two orientations cancel the asymmetry, and the ghost mode vanishes.</p>
+
+            <p>This requirement does not come from one argument alone. Four independent lines of established physics, developed by different research groups in different decades for different purposes, all arrive at the same conclusion: the gravity field requires two tetrahedral field chambers with opposite orientations.</p>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="faq-question-text">Four independent roads to two field chambers</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </div>
+                <div class="faq-answer">
+                    <p><strong>1. Stability (Alexander, Marciano, Smolin 2014):</strong> A single tetrahedral field chamber has a preferred direction, producing a ghost instability. Two opposite chambers cancel the asymmetry and eliminate the ghost.</p>
+                    <p><strong>2. Spinor structure (Weinberg 1995):</strong> Fermions require the SL(2,C) double cover. A 360-degree rotation maps one field chamber onto itself but leaves the other out of phase. A full 720-degree rotation realigns both. Each chamber realises one sheet of the double cover.</p>
+                    <p><strong>3. Chirality (Ashtekar 1986):</strong> Gravity decomposes into self-dual and anti-self-dual components, like left-handed and right-handed gloves. Complete field closure requires both halves, one per field chamber.</p>
+                    <p><strong>4. Bimetric gravity (Hassan, Rosen 2012):</strong> Ghost-free massive gravity requires two dynamical metric fields, each with its own tetrad. The two fields couple through an interaction potential at their shared center.</p>
+                    <p>When four independent roads converge on the same destination, the destination is not hypothesised. It is established.</p>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 BLOCK 6: THE STELLATED OCTAHEDRON
+                 ============================================================ -->
 
             <h2>The Stellated Octahedron</h2>
 
-            <p>The two tetrahedra are oriented in opposite directions and share a common center, forming a stellated octahedron (also known as a stella octangula). The coupling between them operates at three levels. First, the two chambers are strongly coupled as complete units: each tetrahedron interacts with the other as a whole. Second, their faces are coupled: each of the four faces of one chamber aligns with and couples to the faces of the other, creating k = 4 face-to-face channels. Third, at the shared center sits the Field Origin, the interaction vertex where the two field chambers connect through a non-linear coupling term. This is the point in the bimetric framework where both metrics meet, and it is where the field dynamics are determined.</p>
+            <p>Take the two tetrahedral field chambers. Orient them in opposite directions. Interpenetrate them so that each vertex of one sits at the center of a face of the other. The resulting structure is a stellated octahedron: eight vertices, twelve edges, eight triangular faces, and a single shared center where both chambers meet.</p>
 
-            <p>The structure below is a stellated octahedron: two interpenetrating tetrahedra rendered in three dimensions. The central point is the Field Origin.</p>
+            <p>This is the geometry of the gravity field at each point in spacetime. It is the unique structure that satisfies all four requirements simultaneously: stability, spinor structure, chirality, and bimetric consistency. The blue tetrahedron below is one field chamber. The gold tetrahedron is the other. Together, they form the complete gravitational field structure.</p>
 
-            <iframe src="/stellated-octahedron"
-                    style="width: 100%; height: 560px; border: none; border-radius: 4px; background: #000000; margin: 24px 0;">
-            </iframe>
+            <div id="field-viz" style="width: 100%; height: 560px; border-radius: 4px; background: #181818; margin: 24px 0; position: relative;"></div>
 
-            <h2>Field Dynamics</h2>
+            <p>The field closure animation you see is driven by the digits of pi in base 8. Each digit selects a vertex on the stellated octahedron, and the animation traces the path the field takes as it closes through all eight faces. This is not decorative. It is a direct visualisation of how the gravity field achieves closure at every point in its topology.</p>
 
-            <p>The coupling between the two field chambers produces three structural levels, encoded in the polynomial f(k) = 1 + k + k<sup>2</sup>, where k = 4 is the simplex number. The first term is the Field Origin itself: the shared center where both chambers interact. The second term counts the four face-to-face coupling channels. The third term counts all sixteen cross-chamber couplings, every face of one chamber to every face of the other.</p>
+            <!-- ============================================================
+                 BLOCK 7: THE FIELD ORIGIN
+                 ============================================================ -->
 
-            <p>Below a characteristic acceleration scale, the field can no longer sustain full coupling across all k<sup>2</sup> = 16 channels. It enters partial coupling, and the effective gravitational response is enhanced. This is field dynamics: the internal structure of the gravitational field governing its own strength.</p>
+            <h2>The Field Origin</h2>
+
+            <p>At the geometric center of the stellated octahedron, where both field chambers share their midpoint, sits a single distinguished point. This is the <strong>Field Origin</strong>: the interaction vertex where the two tetrahedral field chambers connect.</p>
+
+            <p>All coupling between the two field chambers passes through the Field Origin. It is the only point that belongs to both chambers simultaneously. Think of it as the neck of an hourglass: sand from one chamber can only reach the other by passing through that single constriction. The Field Origin mediates every interaction between the two halves of the gravitational field structure.</p>
+
+            <p>At the Field Origin, the radial distance from the center is zero in both field chambers. This means the propagation time through the Field Origin is r/c = 0. The field can read the state of both chambers simultaneously, without any delay. This instantaneous read is what allows the gravity field to achieve closure: all four coupling faces in both chambers must settle into a single consistent geometric state, and the Field Origin is where that consistency is enforced.</p>
+
+            <p>The Field Origin is not merely a geometric curiosity. It is the structural reason that gravity has the properties it does. Angular momentum propagates through both field chambers and passes through the Field Origin. The face structure of the stellated octahedron, two inward-pointing TIME faces and six outward-pointing SPATIAL faces, produces a ratio of 2/8, which yields spin-1/2 for the bound field configuration. This is the topological origin of electron spin.</p>
+
+            <!-- ============================================================
+                 BLOCK 8: FIELD DYNAMICS
+                 ============================================================ -->
+
+            <h2>Field Dynamics: The Coupling Hierarchy</h2>
+
+            <p>The internal coupling of the gravity field operates at three distinct levels. These levels are not imposed by hand. They emerge directly from the geometry of the stellated octahedron and the k = 4 topology. Together, they define the full depth of gravitational field coupling.</p>
+
+            <p><strong>Level 1: Exist.</strong> At the deepest level sits the Field Origin itself, the single point where both field chambers share their center. This is the irreducible floor of the gravity field. It represents bare field existence: the condition that the field encloses a volume and does not degenerate. There is exactly 1 such point. This is the k<sup>0</sup> term.</p>
+
+            <p><strong>Level 2: Propagate.</strong> Each field chamber has four coupling faces, and through those faces the field propagates to its neighbours. This is the level at which gravitational waves travel. There are exactly 4 face-coupling channels. This is the k<sup>1</sup> term.</p>
+
+            <p><strong>Level 3: Interact.</strong> When both field chambers are fully engaged, every face of one chamber can couple to every face of the other. Four faces times four faces yields 16 bimetric coupling channels. This is the full interaction depth: the complete handshake between both halves of the gravitational field. This is the k<sup>2</sup> term.</p>
+
+            <p>The total coupling depth is 1 + 4 + 16 = 21. This number is not approximate. It is locked by the topology. The coupling hierarchy is encoded in a polynomial: f(k) = 1 + k + k<sup>2</sup>, evaluated at k = 4.</p>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="faq-question-text">The coupling polynomial f(k) = 1 + k + k<sup>2</sup></span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </div>
+                <div class="faq-answer">
+                    <p>The polynomial f(k) = 1 + k + k<sup>2</sup> counts the depth of field coupling through the stellated octahedron. Each term corresponds to a structural level:</p>
+                    <ul>
+                        <li><strong>k<sup>0</sup> = 1:</strong> EXIST. The Field Origin. Binary: the field encloses volume, or it does not.</li>
+                        <li><strong>k<sup>1</sup> = 4:</strong> PROPAGATE. The four face-coupling channels through which the field reaches its neighbours.</li>
+                        <li><strong>k<sup>2</sup> = 16:</strong> INTERACT. The sixteen bimetric coupling channels, one for each face-to-face connection between field chambers.</li>
+                    </ul>
+                    <p>The polynomial truncates at k<sup>2</sup> because coupling occurs on the surface of the tetrahedron, which is two-dimensional. There is no three-dimensional cell on the boundary of a tetrahedron, so there is no k<sup>3</sup> term.</p>
+                    <p>Evaluated at the three structural states of the stellated octahedron:</p>
+                    <ul>
+                        <li>Field Chamber A (s = +1): 1 + 4 + 16 = <strong>21</strong></li>
+                        <li>Field Origin (s = 0): 1 + 0 + 16 = <strong>17</strong></li>
+                        <li>Field Chamber B (s = &minus;1): 1 &minus; 4 + 16 = <strong>13</strong></li>
+                    </ul>
+                    <p>These three integers, 21, 17, and 13, are the structural constants of the gravity field. They determine the gravitational constant G, the fine-structure constant alpha, and the characteristic acceleration scale a<sub>0</sub>.</p>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 BLOCK 9: THE GRAVITATIONAL CONSTANT
+                 ============================================================ -->
+
+            <h2>The Gravitational Constant from Topology</h2>
+
+            <p>Newton's gravitational constant G is one of the oldest measured quantities in physics, and one of the least understood. It appears in every gravitational calculation, yet no theory has explained its value. It is simply measured and inserted. The coupling hierarchy of the gravity field changes this.</p>
+
+            <p>The three structural states of the stellated octahedron produce three integers: 21, 17, and 13. These are not arbitrary. They are the only values the polynomial f(k) = 1 + k + k<sup>2</sup> can produce when evaluated at the three structural positions of the dual field chamber geometry. From these three numbers, the gravitational constant follows directly:</p>
+
+            <div class="eq">G = (17/13) &times; &alpha;<sup>21</sup> &times; &#8463;c / m<sub>e</sub><sup>2</sup></div>
+
+            <p>Every piece of this expression has a structural name. The exponent 21 is the full coupling depth: the total number of channels (1 + 4 + 16) through which the gravity field propagates. The prefactor 17/13 is the ratio of coupling capacity at the Field Origin to the spatial structure of the field chamber. The scale &#8463;c / m<sub>e</sub><sup>2</sup> provides the physical units, set by the quantum of angular momentum, the speed of light, and the electron mass.</p>
+
+            <p>The exponent is catastrophically sensitive. Each unit change multiplies the prediction by a factor of 1/&alpha;, which is approximately 137. An exponent of 20 would predict a gravitational constant 137 times too large. An exponent of 22 would predict one 137 times too small. Only 21 works, and 21 is exactly the coupling depth that the topology produces.</p>
+
+            <p>The predicted value is 6.666 &times; 10<sup>&minus;11</sup> m<sup>3</sup> kg<sup>&minus;1</sup> s<sup>&minus;2</sup>. The measured value is 6.674 &times; 10<sup>&minus;11</sup>. Agreement: 0.12% at tree level. With a standard one-loop quantum correction, the agreement improves to 0.001%. No parameter has been adjusted. The gravitational constant is a topological output of the field structure, not an empirical input.</p>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="faq-question-text">How the polynomial determines G</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </div>
+                <div class="faq-answer">
+                    <p>The coupling polynomial f(k) = 1 + sk + k<sup>2</sup> is evaluated at the three structural states of the stellated octahedron, parameterised by s:</p>
+                    <ul>
+                        <li><strong>Field Chamber A</strong> (s = +1): f = 1 + 4 + 16 = 21. This is the exponent: the full coupling depth through which gravity propagates.</li>
+                        <li><strong>Field Origin</strong> (s = 0): f = 1 + 0 + 16 = 17. This is the numerator of the prefactor: the bimetric coupling channels (16) plus the existence condition (1).</li>
+                        <li><strong>Field Chamber B</strong> (s = &minus;1): f = 1 &minus; 4 + 16 = 13. This is the denominator: the spatial coupling components (k &times; d = 12) plus non-degeneracy (1).</li>
+                    </ul>
+                    <p>The Field Origin value 17 is exactly the arithmetic mean of 21 and 13. This is not a numerical coincidence. For any polynomial of the form 1 + sk + k<sup>2</sup>, evaluating at s = 0 always yields the mean of s = +1 and s = &minus;1. The three states are equally spaced by k = 4, as rigid as three equally spaced marks on a ruler.</p>
+                    <p>The full expression: G = (17/13) &times; &alpha;<sup>21</sup> &times; &#8463;c / m<sub>e</sub><sup>2</sup>. Predicted: 6.666 &times; 10<sup>&minus;11</sup>. Measured: 6.674 &times; 10<sup>&minus;11</sup>. With the Schwinger one-loop QED correction &alpha;/(2&pi;), the prediction becomes 6.6743 &times; 10<sup>&minus;11</sup>, matching to <strong>0.001%</strong>.</p>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 BLOCK 10: THE COVARIANT COMPLETION
+                 ============================================================ -->
+
+            <h2>The Covariant Completion</h2>
+
+            <p>A gravitational constant alone does not make predictions. To compute the rotation curve of a galaxy, or the trajectory of a spacecraft, or the bending of light around a star, we need an action: a single mathematical object from which all the equations of motion, conservation laws, and observable predictions follow. The coupling hierarchy of the dual tetrad topology provides exactly this.</p>
+
+            <p>The covariant completion is a scalar-tensor action that encodes the full three-level coupling structure of the gravity field into four terms:</p>
+
+            <div class="eq">S<sub>ST</sub> = &int; d<sup>4</sup>x &radic;(&minus;g) [ R/(16&pi;G) &minus; a<sub>0</sub><sup>2</sup>/(8&pi;G) F(|&nabla;&Phi;|<sup>2</sup>/a<sub>0</sub><sup>2</sup>) &minus; &frac14; e<sup>&minus;2&Phi;/c<sup>2</sup></sup> F<sub>&mu;&nu;</sub>F<sup>&mu;&nu;</sup> + L<sub>matter</sub> ]</div>
+
+            <p>This action has zero free parameters. The gravitational constant G, the saturation scale a<sub>0</sub>, the Lagrangian density F, and the disformal coupling are all determined by the topology. Every term traces back to the coupling polynomial f(k) = 1 + k + k<sup>2</sup>.</p>
+
+            <p>The curvature term R/(16&pi;G) carries all three structural states through G, whose exponent, numerator, and denominator are the three polynomial values {21, 17, 13}. The scalar-field Lagrangian F is the centerpiece: it decomposes into three terms, one for each structural level of the coupling hierarchy. The disformal coupling e<sup>&minus;2&Phi;/c<sup>2</sup></sup> governs how photons propagate through the scalar field, with the factor of 2 counting the two field chambers.</p>
+
+            <p>The action is bidirectional. In the forward direction, it takes a distribution of mass and predicts the gravitational field at every point. In the inverse direction, it takes an observed velocity and infers the mass that produced it. Both directions are algebraic: no numerical integration, no iteration, no fitting. This bidirectionality is not a mathematical convenience. It is a physical requirement: the gravity field does not distinguish between "predicting a velocity from mass" and "inferring mass from velocity." Both are readings of the same field configuration, and the action inherits the exchange symmetry of the two field chambers.</p>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="faq-question-text">The scalar-tensor action: term by term</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </div>
+                <div class="faq-answer">
+                    <p><strong>The curvature term</strong> R/(16&pi;G) is the Einstein-Hilbert action of general relativity. The gravitational constant G encodes all three structural states: the exponent 21 = f(k) at s = +1, the numerator 17 = f(k) at s = 0, and the denominator 13 = f(k) at s = &minus;1.</p>
+                    <p><strong>The scalar-field Lagrangian</strong> F(y), where y = |&nabla;&Phi;|<sup>2</sup>/a<sub>0</sub><sup>2</sup>, is determined uniquely by the constitutive law derived from detailed balance at the Field Origin. It decomposes into three terms:</p>
+                    <ul>
+                        <li><strong>y</strong> (the full interaction level, k<sup>2</sup> = 16): Quadratic, dominant at high acceleration, where all coupling channels are active and gravity is Newtonian.</li>
+                        <li><strong>&minus;2&radic;y</strong> (the face propagation level, k = 4): The negative sign reflects partially occupied propagation channels, which represent an energy cost in the Lagrangian. The coefficient 2 counts the two field chambers.</li>
+                        <li><strong>2 ln(1 + &radic;y)</strong> (the Field Origin level, k<sup>0</sup> = 1): Logarithmic, never zero, always present. This is the irreducible floor of the Lagrangian, the term that ensures the field never fully degenerates. The coefficient 2 again reflects the dual structure.</li>
+                    </ul>
+                    <p><strong>The disformal coupling</strong> e<sup>&minus;2&Phi;/c<sup>2</sup></sup> modifies how photons propagate through the scalar field. The factor of 2 has the same structural origin as the squared speed of light in E = mc<sup>2</sup>: it counts the two field chambers. This ensures that lensing mass equals dynamical mass, and that photons experience the full bimetric potential.</p>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 BLOCK 11: WHAT HAPPENS AT LOW ACCELERATION
+                 ============================================================ -->
+
+            <h2>Full Coupling and Partial Coupling</h2>
+
+            <p>When the gravitational field is strong, all 21 coupling channels are engaged. The field is in full coupling: both field chambers are fully active, all 16 bimetric channels are saturated, all 4 face channels are propagating, and the Field Origin is mediating the complete interaction. In this regime, gravity behaves exactly as Newton described: the force falls off as the square of the distance.</p>
+
+            <p>But there is a threshold. Below a characteristic acceleration scale called a<sub>0</sub>, approximately 1.2 &times; 10<sup>&minus;10</sup> m/s<sup>2</sup>, the field can no longer sustain full coupling across all channels. The bimetric channels begin to disengage. The face channels lose saturation. The field enters <strong>partial coupling</strong>.</p>
+
+            <p>In partial coupling, the only channel that persists unconditionally is the Field Origin: the k<sup>0</sup> = 1 term, the irreducible floor. Even when every other coupling channel has relaxed, the Field Origin remains. The gravity field never fully switches off. It simply operates through fewer channels, and the effective gravitational response changes character.</p>
+
+            <p>The result is that gravity transitions from falling as 1/r<sup>2</sup> to falling as 1/r. This is precisely what astronomers observe in the outskirts of spiral galaxies, where stars orbit at velocities that remain constant with increasing distance from the galactic center. The rotation curves are flat, and they are flat because the gravity field has entered partial coupling. The internal structure of the field, not invisible matter, is responsible.</p>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="faq-question-text">The acceleration scale a<sub>0</sub> and galactic rotation</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </div>
+                <div class="faq-answer">
+                    <p>The characteristic acceleration a<sub>0</sub> = k<sup>2</sup> &times; G &times; m<sub>e</sub> / r<sub>e</sub><sup>2</sup> marks the boundary between full coupling and partial coupling. Above a<sub>0</sub>, all 16 bimetric channels engage and gravity obeys Newton's inverse square law. Below a<sub>0</sub>, channels disengage and the effective gravity is enhanced.</p>
+                    <p>The field equation derived from the scalar-tensor action governs the transition. Writing x = g/a<sub>0</sub>, the relationship is x<sup>2</sup>/(1 + x) = g<sub>N</sub>/a<sub>0</sub>. The "1" in the denominator is the Field Origin, the k<sup>0</sup> = 1 term in the coupling polynomial. Even at zero acceleration, the Field Origin persists as the irreducible floor of gravitational coupling.</p>
+                    <p>In the deep partial coupling limit (g much less than a<sub>0</sub>), the effective gravity becomes g<sub>eff</sub> = &radic;(G M a<sub>0</sub>) / r, proportional to 1/r. The orbital velocity is then v<sup>2</sup> = g<sub>eff</sub> &times; r = &radic;(G M a<sub>0</sub>), which is constant. The rotation curve is flat.</p>
+                    <p>This matches the observed rotation curves of spiral galaxies with <strong>zero adjustable parameters</strong>. The entire "dark matter" fraction is a calculation artifact arising from applying a 1/r<sup>2</sup> law in a regime where the gravity field has transitioned to 1/r.</p>
+                </div>
+            </div>
+
+            <p>This is field dynamics: the internal structure of the gravity field governing its own strength. Not a modification of gravity, but a consequence of what gravity has always been, a field with topology, with field chambers, with a Field Origin, and with a coupling hierarchy that responds to the conditions it encounters.</p>
+
         </div>
     </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/stellated_octahedron.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Preflight validation
+        try {
+            PiBase8Validator.assertValid();
+        } catch (error) {
+            console.error('[Field] Pi base-8 validation failed:', error.message);
+            return;
+        }
+
+        // Initialize renderer into the container div
+        var container = document.getElementById('field-viz');
+        var renderer = new StellatedOctahedronRenderer(container);
+        renderer.init();
+
+        // If WebGL failed, the renderer shows a fallback message.
+        if (renderer._webglFailed) return;
+
+        // Lock to TIME floor horizontal orientation
+        renderer.lockTimeFloor();
+
+        // Show full structure (both tetrahedra + field origin + ports)
+        renderer.setVisibilityLevel(4);
+
+        // Start field closure animation
+        var engine = new FieldClosureEngine(renderer);
+        engine.setManualMode(false);
+        engine.speedMultiplier = 1;
+        engine.start();
+    });
+</script>
 {% endblock %}

@@ -1708,6 +1708,19 @@ Browser Support:
                 this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
                 this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
                 this.container.appendChild(this.renderer.domElement);
+
+                // Handle WebGL context loss (browsers may reclaim GPU resources
+                // when the iframe is scrolled off-screen).
+                const self = this;
+                this.renderer.domElement.addEventListener('webglcontextlost', (e) => {
+                    e.preventDefault();
+                    console.warn('[Stellated] WebGL context lost, pausing render loop.');
+                    if (self.animationId) cancelAnimationFrame(self.animationId);
+                }, false);
+                this.renderer.domElement.addEventListener('webglcontextrestored', () => {
+                    console.log('[Stellated] WebGL context restored, resuming.');
+                    self._startAnimation();
+                }, false);
             }
 
             _createLights() {
@@ -2124,11 +2137,12 @@ Browser Support:
                 domElement.addEventListener('mouseup', () => { this.isDragging = false; });
                 domElement.addEventListener('mouseleave', () => { this.isDragging = false; });
 
+                // Wheel zoom disabled: fixed camera prevents scroll-through crashes
+                // when embedded in an iframe on a scrollable page.  Block the
+                // event at the element level so it never reaches the browser.
                 domElement.addEventListener('wheel', (e) => {
                     e.preventDefault();
-                    const delta = e.deltaY > 0 ? 1.1 : 0.9;
-                    this.camera.position.multiplyScalar(delta);
-                    this.camera.position.clampLength(2, 15);
+                    e.stopPropagation();
                 }, { passive: false });
 
                 // Touch support
@@ -3130,6 +3144,15 @@ Browser Support:
         // =========================================================================
         // APPLICATION INITIALIZATION
         // =========================================================================
+
+        // Block all wheel/scroll events at the document level so they never
+        // propagate back to a parent page or trigger browser-default behaviour
+        // inside this iframe.  This prevents WebGL context crashes caused by
+        // runaway zoom when embedded in a scrollable page.
+        document.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        }, { passive: false });
 
         document.addEventListener('DOMContentLoaded', () => {
             // Hide UI panels permanently (landing mode)
