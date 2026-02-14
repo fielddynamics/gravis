@@ -48,7 +48,7 @@
 
             <p><strong>From geometry:</strong> in three spatial dimensions, the simplest possible shape that encloses a volume is a tetrahedron, a solid with exactly four triangular faces. This is the three-dimensional equivalent of a triangle being the simplest shape that encloses area in two dimensions. You cannot enclose a volume with fewer than four faces. Geometry itself sets the floor: k must be at least 4.</p>
 
-            <p><strong>From observation:</strong> LIGO measured exactly two polarisations of gravitational waves. The spacetime metric has ten independent components. With k coupling constraints and k gauge freedoms, the number of propagating degrees of freedom is 10 minus 2k. Only k = 4 yields exactly two, matching what LIGO observed. Any other value of k produces the wrong number of polarisations. Observation sets the ceiling: k cannot exceed 4.</p>
+            <p><strong>From observation:</strong> LIGO measured exactly two polarisations of gravitational waves. Where do those two come from? When TetA and TetB couple, the field propagates through k = 4 shared faces. Each face is a triangle, a two-dimensional surface, and a wave passing through that face can oscillate in exactly two independent directions within its plane. Those two transverse directions are the two polarisations: plus and cross. If the field had fewer faces, more independent oscillation modes would remain unconstrained. If it had more, some faces would be redundant and gravity could not propagate at all. Only k = 4 produces exactly two polarisations, matching what LIGO observed. Observation sets the ceiling: k cannot exceed 4.</p>
 
             <p>The floor is 4. The ceiling is 4. The gravity field is k = 4 organised.</p>
 
@@ -59,7 +59,7 @@
                 </div>
                 <div class="faq-answer">
                     <p><strong>The simplex theorem</strong> states that in d spatial dimensions, the minimum convex polytope that encloses volume has exactly d + 1 faces. For d = 3: the tetrahedron, with 4 faces. This is not a choice. Three dimensions force it.</p>
-                    <p><strong>The LIGO constraint</strong> works from the other direction. The symmetric metric tensor in (3+1) spacetime has 10 independent components. Each coupling face contributes one constraint and one gauge freedom, removing 2k components from the propagating count. The number of physical, propagating degrees of freedom is 10 &minus; 2k. LIGO measured exactly 2 tensor polarisations. Setting 10 &minus; 2k = 2 gives k = 4. If k = 3, there would be 4 polarisations (too many). If k = 5, there would be 0 (gravity could not propagate at all).</p>
+                    <p><strong>The LIGO constraint</strong> works from the other direction. When TetA and TetB couple, the gravitational field propagates through their shared faces. Each face is a triangle, a two-dimensional surface. A wave passing through a 2D face can oscillate transversely in exactly 2 independent directions: these are the plus (+) and cross (&times;) polarisations that LIGO detected. The face geometry determines the polarisation count directly. If k = 3 (three faces, not enough to enclose volume), the unconstrained metric components would allow 4 polarisations, too many. If k = 5, the over-constrained structure would leave 0 propagating modes, and gravity could not propagate at all. Only k = 4 yields exactly 2, matching observation.</p>
                 </div>
             </div>
 
@@ -129,7 +129,7 @@
 
             <div id="field-viz" style="width: 100%; height: 560px; border-radius: 4px; background: #181818; margin: 24px 0; position: relative;"></div>
 
-            <p>The field closure animation you see is driven by the digits of pi in base 8. Each digit selects a vertex on the stellated octahedron, and the animation traces the path the field takes as it closes through all eight faces. This is not decorative. It is a direct visualisation of how the gravity field achieves closure at every point in its topology.</p>
+            <p>The animation traces field closure: the process by which the gravity field settles into a single consistent geometric state across all eight faces of the stellated octahedron.</p>
 
             <!-- ============================================================
                  BLOCK 7: THE FIELD ORIGIN
@@ -155,9 +155,9 @@
 
             <p><strong>Level 1: Exist.</strong> At the deepest level sits the Field Origin itself, the single point where both field chambers share their center. This is the irreducible floor of the gravity field. It represents bare field existence: the condition that the field encloses a volume and does not degenerate. There is exactly 1 such point. This is the k<sup>0</sup> term.</p>
 
-            <p><strong>Level 2: Propagate.</strong> Each field chamber has four coupling faces, and through those faces the field propagates to its neighbours. This is the level at which gravitational waves travel. There are exactly 4 face-coupling channels. This is the k<sup>1</sup> term.</p>
+            <p><strong>Level 2: Propagate.</strong> From the Field Origin, the field propagates through one coupled face of the tetrahedron. When the opposite tetrahedron couples through, its vertex penetrates the face center and subdivides the triangle into 3 + 1 = 4 sub-regions: three corner sub-regions anchored at the original vertices, and one central coupling sub-region at the penetration point. This is the level at which gravitational waves travel, and it is the k<sup>1</sup> term.</p>
 
-            <p><strong>Level 3: Interact.</strong> When both field chambers are fully engaged, every face of one chamber can couple to every face of the other. Four faces times four faces yields 16 bimetric coupling channels. This is the full interaction depth: the complete handshake between both halves of the gravitational field. This is the k<sup>2</sup> term.</p>
+            <p><strong>Level 3: Interact.</strong> When both field chambers are fully engaged, all four faces of the tetrahedron are coupled, and each face carries 4 sub-regions from the penetration. Four faces, each subdivided into four: 4 &times; 4 = 16 coupled sub-regions. This is the full interaction depth of the dual tetrad topology, and it is the k<sup>2</sup> term.</p>
 
             <p>The total coupling depth is 1 + 4 + 16 = 21. This number is not approximate. It is locked by the topology. The coupling hierarchy is encoded in a polynomial: f(k) = 1 + k + k<sup>2</sup>, evaluated at k = 4.</p>
 
@@ -170,8 +170,8 @@
                     <p>The polynomial f(k) = 1 + k + k<sup>2</sup> counts the depth of field coupling through the stellated octahedron. Each term corresponds to a structural level:</p>
                     <ul>
                         <li><strong>k<sup>0</sup> = 1:</strong> EXIST. The Field Origin. Binary: the field encloses volume, or it does not.</li>
-                        <li><strong>k<sup>1</sup> = 4:</strong> PROPAGATE. The four face-coupling channels through which the field reaches its neighbours.</li>
-                        <li><strong>k<sup>2</sup> = 16:</strong> INTERACT. The sixteen bimetric coupling channels, one for each face-to-face connection between field chambers.</li>
+                        <li><strong>k<sup>1</sup> = 4:</strong> PROPAGATE. One coupled face, subdivided into 3 + 1 = 4 sub-regions when the opposite tetrahedron's vertex penetrates the face center.</li>
+                        <li><strong>k<sup>2</sup> = 16:</strong> INTERACT. All four faces coupled, each carrying 4 sub-regions: 4 &times; 4 = 16 coupled sub-regions spanning the full dual tetrad interaction.</li>
                     </ul>
                     <p>The polynomial truncates at k<sup>2</sup> because coupling occurs on the surface of the tetrahedron, which is two-dimensional. There is no three-dimensional cell on the boundary of a tetrahedron, so there is no k<sup>3</sup> term.</p>
                     <p>Evaluated at the three structural states of the stellated octahedron:</p>
@@ -211,7 +211,7 @@
                     <p>The coupling polynomial f(k) = 1 + sk + k<sup>2</sup> is evaluated at the three structural states of the stellated octahedron, parameterised by s:</p>
                     <ul>
                         <li><strong>Field Chamber A</strong> (s = +1): f = 1 + 4 + 16 = 21. This is the exponent: the full coupling depth through which gravity propagates.</li>
-                        <li><strong>Field Origin</strong> (s = 0): f = 1 + 0 + 16 = 17. This is the numerator of the prefactor: the bimetric coupling channels (16) plus the existence condition (1).</li>
+                        <li><strong>Field Origin</strong> (s = 0): f = 1 + 0 + 16 = 17. This is the numerator of the prefactor: the full interaction channels (16) plus the existence condition (1).</li>
                         <li><strong>Field Chamber B</strong> (s = &minus;1): f = 1 &minus; 4 + 16 = 13. This is the denominator: the spatial coupling components (k &times; d = 12) plus non-degeneracy (1).</li>
                     </ul>
                     <p>The Field Origin value 17 is exactly the arithmetic mean of 21 and 13. This is not a numerical coincidence. For any polynomial of the form 1 + sk + k<sup>2</sup>, evaluating at s = 0 always yields the mean of s = +1 and s = &minus;1. The three states are equally spaced by k = 4, as rigid as three equally spaced marks on a ruler.</p>
@@ -260,9 +260,9 @@
 
             <h2>Full Coupling and Partial Coupling</h2>
 
-            <p>When the gravitational field is strong, all 21 coupling channels are engaged. The field is in full coupling: both field chambers are fully active, all 16 bimetric channels are saturated, all 4 face channels are propagating, and the Field Origin is mediating the complete interaction. In this regime, gravity behaves exactly as Newton described: the force falls off as the square of the distance.</p>
+            <p>When the gravitational field is strong, all 21 coupling channels are engaged. The field is in full coupling: both field chambers are fully active, all 16 coupled sub-regions are saturated, all 4 face channels are propagating, and the Field Origin is mediating the complete interaction. In this regime, gravity behaves exactly as Newton described: the force falls off as the square of the distance.</p>
 
-            <p>But there is a threshold. Below a characteristic acceleration scale called a<sub>0</sub>, approximately 1.2 &times; 10<sup>&minus;10</sup> m/s<sup>2</sup>, the field can no longer sustain full coupling across all channels. The bimetric channels begin to disengage. The face channels lose saturation. The field enters <strong>partial coupling</strong>.</p>
+            <p>But there is a threshold. Below a characteristic acceleration scale called a<sub>0</sub>, approximately 1.2 &times; 10<sup>&minus;10</sup> m/s<sup>2</sup>, the field can no longer sustain full coupling across all channels. The coupled sub-regions begin to disengage. The face channels lose saturation. The field enters <strong>partial coupling</strong>.</p>
 
             <p>In partial coupling, the only channel that persists unconditionally is the Field Origin: the k<sup>0</sup> = 1 term, the irreducible floor. Even when every other coupling channel has relaxed, the Field Origin remains. The gravity field never fully switches off. It simply operates through fewer channels, and the effective gravitational response changes character.</p>
 
@@ -274,7 +274,7 @@
                     <span class="faq-chevron">&rsaquo;</span>
                 </div>
                 <div class="faq-answer">
-                    <p>The characteristic acceleration a<sub>0</sub> = k<sup>2</sup> &times; G &times; m<sub>e</sub> / r<sub>e</sub><sup>2</sup> marks the boundary between full coupling and partial coupling. Above a<sub>0</sub>, all 16 bimetric channels engage and gravity obeys Newton's inverse square law. Below a<sub>0</sub>, channels disengage and the effective gravity is enhanced.</p>
+                    <p>The characteristic acceleration a<sub>0</sub> = k<sup>2</sup> &times; G &times; m<sub>e</sub> / r<sub>e</sub><sup>2</sup> marks the boundary between full coupling and partial coupling. Above a<sub>0</sub>, all 16 coupled sub-regions engage and gravity obeys Newton's inverse square law. Below a<sub>0</sub>, sub-regions disengage and the effective gravity is enhanced.</p>
                     <p>The field equation derived from the scalar-tensor action governs the transition. Writing x = g/a<sub>0</sub>, the relationship is x<sup>2</sup>/(1 + x) = g<sub>N</sub>/a<sub>0</sub>. The "1" in the denominator is the Field Origin, the k<sup>0</sup> = 1 term in the coupling polynomial. Even at zero acceleration, the Field Origin persists as the irreducible floor of gravitational coupling.</p>
                     <p>In the deep partial coupling limit (g much less than a<sub>0</sub>), the effective gravity becomes g<sub>eff</sub> = &radic;(G M a<sub>0</sub>) / r, proportional to 1/r. The orbital velocity is then v<sup>2</sup> = g<sub>eff</sub> &times; r = &radic;(G M a<sub>0</sub>), which is constant. The rotation curve is flat.</p>
                     <p>This matches the observed rotation curves of spiral galaxies with <strong>zero adjustable parameters</strong>. The entire "dark matter" fraction is a calculation artifact arising from applying a 1/r<sup>2</sup> law in a regime where the gravity field has transitioned to 1/r.</p>

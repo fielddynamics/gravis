@@ -53,7 +53,7 @@ const FAQ_DATA = [
             },
             {
                 q: "What is the coupling polynomial f(k)?",
-                a: "<p>The coupling polynomial <strong>f(k) = 1 + k + k<sup>2</sup></strong> encodes the three structural levels of the stellated octahedron:</p><ul><li><strong>k<sup>0</sup> = 1</strong>: The Field Origin (single interaction vertex)</li><li><strong>k<sup>1</sup> = 4</strong>: Face coupling channels through the vierbein</li><li><strong>k<sup>2</sup> = 16</strong>: Full field interaction (4 faces &times; 4 faces)</li></ul><p>These three levels determine the complete coupling architecture of the gravitational field and map directly onto the three terms of the Lagrangian density F(y) = y/2 &minus; &radic;y + ln(1 + &radic;y).</p>"
+                a: "<p>The coupling polynomial <strong>f(k) = 1 + k + k<sup>2</sup></strong> encodes the three structural levels of the stellated octahedron:</p><ul><li><strong>k<sup>0</sup> = 1</strong>: The Field Origin (single interaction vertex)</li><li><strong>k<sup>1</sup> = 4</strong>: One coupled face, subdivided into 3 + 1 = 4 sub-regions by the opposite tetrahedron's vertex</li><li><strong>k<sup>2</sup> = 16</strong>: All four faces coupled, each carrying 4 sub-regions: 4 &times; 4 = 16</li></ul><p>These three levels determine the complete coupling architecture of the gravitational field and map directly onto the three terms of the Lagrangian density F(y) = y/2 &minus; &radic;y + ln(1 + &radic;y).</p>"
             },
             {
                 q: "What is the Lagrangian F(y)?",
