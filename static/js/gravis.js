@@ -487,76 +487,59 @@ function buildObservedTooltip(dp) {
     html += '</div>';
     html += '<hr style="margin:0 12px;border:none;border-top:1px solid #444;">';
 
-    // Section 1: Velocity comparison
+    // Section 1: Velocity comparison (with deltas from observed)
     html += ttSection('Velocity Comparison');
-    html += '<table style="width:100%;padding:4px 12px 6px;border-spacing:0;">';
     var errStr = (err > 0) ? ' \u00B1 ' + err : '';
-    html += ttRow('<span style="color:#ffa726;">\u25CF</span> Observed', vObs.toFixed(1) + errStr + ' km/s', '#ffa726');
 
     var gfdV = interpolateCurve(1, r);
     var gfdStructureV = interpolateCurve(8, r);
     var newtonV = interpolateCurve(0, r);
     var mondV = interpolateCurve(2, r);
     var cdmV = interpolateCurve(7, r);
-    if (gfdV !== null)    html += ttRow('<span style="color:#4da6ff;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s', '#4da6ff');
-    if (gfdStructureV !== null && chart.data.datasets[8].data.length > 0) {
-        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD\u03C6', gfdStructureV.toFixed(1) + ' km/s', '#76FF03');
+
+    // Helper: format a delta value with color coding
+    function fmtDelta(theoryV) {
+        var d = theoryV - vObs;
+        var pct = (d / vObs) * 100;
+        var sign = d >= 0 ? '+' : '';
+        var dColor = Math.abs(pct) < 5 ? '#4caf50'
+                   : Math.abs(pct) < 15 ? '#ffa726'
+                   : '#ef5350';
+        return '<span style="color:' + dColor + ';font-size:11px;"> ' + sign + pct.toFixed(1) + '%</span>';
     }
-    if (newtonV !== null) html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s', '#ef5350');
-    if (mondV !== null)   html += ttRow('<span style="color:#ab47bc;">\u25CF</span> MOND', mondV.toFixed(1) + ' km/s', '#ab47bc');
+
+    html += '<table style="width:100%;padding:4px 12px 6px;border-spacing:0;">';
+    html += ttRow('<span style="color:#ffa726;">\u25CF</span> Observed', vObs.toFixed(1) + errStr + ' km/s', '#ffa726');
+    if (gfdV !== null)    html += ttRow('<span style="color:#4da6ff;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s' + fmtDelta(gfdV), '#4da6ff');
+    if (gfdStructureV !== null && chart.data.datasets[8].data.length > 0) {
+        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD\u03C6', gfdStructureV.toFixed(1) + ' km/s' + fmtDelta(gfdStructureV), '#76FF03');
+    }
+    if (newtonV !== null) html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s' + fmtDelta(newtonV), '#ef5350');
+    if (mondV !== null)   html += ttRow('<span style="color:#ab47bc;">\u25CF</span> MOND', mondV.toFixed(1) + ' km/s' + fmtDelta(mondV), '#ab47bc');
     if (cdmV !== null && chart.data.datasets[7].data.length > 0) {
-        html += ttRow('<span style="color:#ffffff;">\u25CF</span> CDM+NFW', cdmV.toFixed(1) + ' km/s', '#ffffff');
+        html += ttRow('<span style="color:#ffffff;">\u25CF</span> CDM+NFW', cdmV.toFixed(1) + ' km/s' + fmtDelta(cdmV), '#ffffff');
     }
     html += '</table>';
 
-    // Section 2: GFD Agreement
-    if (gfdV !== null) {
-        html += ttSection('GFD Agreement');
+    // Section 2: GFD Agreement (sigma detail)
+    if (gfdV !== null && err > 0) {
         var delta = gfdV - vObs;
-        var resStr = (delta >= 0 ? '+' : '') + delta.toFixed(1) + ' km/s';
+        var sigAway = Math.abs(delta) / err;
+        var sigColor = sigAway < 1.0 ? '#4caf50'
+                     : sigAway < 2.0 ? '#8bc34a'
+                     : sigAway < 3.0 ? '#ffa726'
+                     : '#ef5350';
+        var sigLabel = sigAway < 1.0 ? 'within 1\u03C3'
+                     : sigAway < 2.0 ? 'within 2\u03C3'
+                     : sigAway < 3.0 ? '2-3\u03C3'
+                     : '> 3\u03C3';
+        html += ttSection('GFD Agreement');
         html += '<div style="padding:4px 12px 6px;">';
         html += '<span style="color:#e0e0e0;">GFD &minus; Obs: </span>';
-        html += '<span style="font-weight:600;color:#e0e0e0;">' + resStr + '</span>';
-        if (err > 0) {
-            var sigAway = Math.abs(delta) / err;
-            var sigColor = sigAway < 1.0 ? '#4caf50'
-                         : sigAway < 2.0 ? '#8bc34a'
-                         : sigAway < 3.0 ? '#ffa726'
-                         : '#ef5350';
-            var sigLabel = sigAway < 1.0 ? 'within 1\u03C3'
-                         : sigAway < 2.0 ? 'within 2\u03C3'
-                         : sigAway < 3.0 ? '2-3\u03C3'
-                         : '> 3\u03C3';
-            html += '<br><span style="font-size:11px;color:' + sigColor + ';font-weight:600;">'
-                + sigAway.toFixed(1) + '\u03C3 &mdash; ' + sigLabel + '</span>';
-        }
+        html += '<span style="font-weight:600;color:#e0e0e0;">' + (delta >= 0 ? '+' : '') + delta.toFixed(1) + ' km/s</span>';
+        html += '<br><span style="font-size:11px;color:' + sigColor + ';font-weight:600;">'
+            + sigAway.toFixed(1) + '\u03C3 &mdash; ' + sigLabel + '</span>';
         html += '</div>';
-    }
-
-    // Section 3: Theory rankings (closest to observation)
-    var theories = [];
-    if (gfdV !== null)    theories.push({name: 'GFD',     v: gfdV,    color: '#4da6ff'});
-    if (newtonV !== null) theories.push({name: 'Newton',  v: newtonV, color: '#ef5350'});
-    if (mondV !== null)   theories.push({name: 'MOND',    v: mondV,   color: '#ab47bc'});
-    if (cdmV !== null && chart.data.datasets[7].data.length > 0) {
-        theories.push({name: 'CDM+NFW', v: cdmV, color: '#ffffff'});
-    }
-    if (theories.length > 1) {
-        theories.sort(function(a, b) { return Math.abs(a.v - vObs) - Math.abs(b.v - vObs); });
-        html += ttSection('Closest to Observed');
-        html += '<table style="width:100%;padding:4px 12px 6px;border-spacing:0;">';
-        for (var i = 0; i < theories.length; i++) {
-            var t = theories[i];
-            var res = t.v - vObs;
-            var resLabel = (res >= 0 ? '+' : '') + res.toFixed(1) + ' km/s';
-            var rankStr = '';
-            html += '<tr>'
-                + '<td style="padding:2px 6px 2px 0;color:' + t.color + ';white-space:nowrap;">' + t.name + '</td>'
-                + '<td style="padding:2px 4px;color:#e0e0e0;text-align:right;font-variant-numeric:tabular-nums;">' + resLabel + '</td>'
-                + '<td style="padding:2px 0 2px 6px;color:#4caf50;font-size:11px;">' + rankStr + '</td>'
-                + '</tr>';
-        }
-        html += '</table>';
     }
 
     // Section 4: Acceleration regime
