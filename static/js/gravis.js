@@ -200,7 +200,7 @@ function updateMassModelDisplaysOnly() {
 });
 
 // Galactic radius slider listener: updates the display and triggers
-// chart recompute so the GFD+ structural term responds in real time.
+// chart recompute so the GFDphi structural term responds in real time.
 galacticRadiusSlider.addEventListener('input', () => {
     galacticRadiusValue.textContent = galacticRadiusSlider.value + ' kpc';
     debouncedUpdateChart();
@@ -403,7 +403,7 @@ function buildInferenceTooltip(dp) {
     var mondV = interpolateCurve(2, r);
     var cdmV = interpolateCurve(7, r);
     if (gfdStructureV2 !== null && chart.data.datasets[8].data.length > 0) {
-        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD+', gfdStructureV2.toFixed(1) + ' km/s', '#76FF03');
+        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD\u03C6', gfdStructureV2.toFixed(1) + ' km/s', '#76FF03');
     }
     if (newtonV !== null) {
         html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s', '#ef5350');
@@ -500,7 +500,7 @@ function buildObservedTooltip(dp) {
     var cdmV = interpolateCurve(7, r);
     if (gfdV !== null)    html += ttRow('<span style="color:#4da6ff;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s', '#4da6ff');
     if (gfdStructureV !== null && chart.data.datasets[8].data.length > 0) {
-        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD+', gfdStructureV.toFixed(1) + ' km/s', '#76FF03');
+        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD\u03C6', gfdStructureV.toFixed(1) + ' km/s', '#76FF03');
     }
     if (newtonV !== null) html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s', '#ef5350');
     if (mondV !== null)   html += ttRow('<span style="color:#ab47bc;">\u25CF</span> MOND', mondV.toFixed(1) + ' km/s', '#ab47bc');
@@ -734,7 +734,7 @@ const chart = new Chart(ctx, {
                 pointStyle: 'line',
                 showLine: false
             },
-            // Dataset 4: GFD/GFD+ envelope upper edge (hidden from legend)
+            // Dataset 4: GFD/GFDphi envelope upper edge (hidden from legend)
             {
                 label: 'GFD envelope upper',
                 data: [],
@@ -746,7 +746,7 @@ const chart = new Chart(ctx, {
                 pointRadius: 0,
                 fill: {target: 5, above: 'rgba(118, 255, 3, 0.10)', below: 'rgba(118, 255, 3, 0.10)'}
             },
-            // Dataset 5: GFD/GFD+ envelope lower edge (hidden from legend)
+            // Dataset 5: GFD/GFDphi envelope lower edge (hidden from legend)
             {
                 label: 'GFD envelope lower',
                 data: [],
@@ -780,9 +780,9 @@ const chart = new Chart(ctx, {
                 tension: 0.4,
                 pointRadius: 0
             },
-            // Dataset 8: GFD+ (covariant + recursive structural release)
+            // Dataset 8: GFD\u03C6 (covariant + gas-fraction-scaled structural release)
             {
-                label: 'GFD+',
+                label: 'GFD\u03C6',
                 data: [],
                 borderColor: '#76FF03',
                 backgroundColor: 'rgba(118, 255, 3, 0.08)',
@@ -1171,9 +1171,9 @@ async function updateBand() {
         return;
     }
 
-    // --- Inference mode: envelope between GFD and GFD+ ---
+    // --- Inference mode: envelope between GFD and GFD\u03C6 ---
     var gfdData = chart.data.datasets[1].data;       // GFD
-    var gfdPlusData = chart.data.datasets[8].data;    // GFD+
+    var gfdPlusData = chart.data.datasets[8].data;    // GFDphi
 
     if (gfdData.length > 0 && gfdPlusData.length > 0) {
         // Both curves exist: band = max / min at each point
@@ -1189,7 +1189,7 @@ async function updateBand() {
         chart.data.datasets[4].data = upperData;
         chart.data.datasets[5].data = lowerData;
     } else if (gfdData.length > 0) {
-        // GFD+ not available: no meaningful band to show
+        // GFDphi not available: no meaningful band to show
         chart.data.datasets[4].data = [];
         chart.data.datasets[5].data = [];
     } else {
@@ -1210,9 +1210,9 @@ function updateBandLabel() {
     var el = document.getElementById('band-width-display');
     if (!el || lastModelTotal <= 0) return;
     el.innerHTML = '<strong style="color:#e0e0e0;">Band:</strong> '
-        + '<span style="color:#76FF03;">GFD / GFD+ envelope</span>'
+        + '<span style="color:#76FF03;">GFD / GFD\u03C6 envelope</span>'
         + '<div style="font-size:0.8em; color:#606060; margin-top:2px;">'
-        + 'Shaded region between base GFD and GFD+ (structural) predictions</div>';
+        + 'Shaded region between base GFD and GFD\u03C6 (structural) predictions</div>';
 }
 
 /**
@@ -1237,7 +1237,7 @@ function renderMultiPointSidebar(result, modelTotal) {
 
     html += '<div style="margin-bottom: 10px; line-height: 1.5;">';
     html += 'Mass inferred at <strong style="color:#e0e0e0;">' + result.n_points + '</strong> radii. ';
-    html += '<span style="color:#76FF03;">Band</span> = GFD / GFD+ envelope.';
+    html += '<span style="color:#76FF03;">Band</span> = GFD / GFD\u03C6 envelope.';
     html += '</div>';
 
     html += '<div style="margin-bottom: 6px;">';
@@ -1541,18 +1541,20 @@ async function updateChart() {
             const data = await fetchRotationCurve(chartMaxR, accelRatio, curveModel, predObs, getGalacticRadius());
             renderCurves(data);
 
-            // Show observation points -- use pinned observations if user is fine-tuning
+            // Show observation points -- use pinned observations if user is fine-tuning,
+            // but respect the user's toggle chip state
+            var obsEnabled = isChipEnabled('observed');
             var visibleObs = predObs;
             if (visibleObs && visibleObs.length > 0) {
                 chart.data.datasets[3].data = visibleObs.map(function(obs) {
                     return {x: obs.r, y: obs.v, err: obs.err || 0};
                 });
-                chart.data.datasets[3].hidden = false;
-                observedLegend.style.display = 'flex';
+                chart.data.datasets[3].hidden = !obsEnabled;
+                observedLegend.style.display = obsEnabled ? 'flex' : 'none';
             } else if (currentExample) {
                 chart.data.datasets[3].data = [{x: r_obs, y: v_obs}];
-                chart.data.datasets[3].hidden = false;
-                observedLegend.style.display = 'flex';
+                chart.data.datasets[3].hidden = !obsEnabled;
+                observedLegend.style.display = obsEnabled ? 'flex' : 'none';
             } else {
                 chart.data.datasets[3].data = [];
                 chart.data.datasets[3].hidden = true;
@@ -1581,14 +1583,16 @@ async function updateChart() {
             const data = await fetchRotationCurve(predMaxR, accelRatio, massModel, predObs, getGalacticRadius());
             renderCurves(data);
 
-            // Handle observed data -- show pinned observations even when sliders are adjusted
+            // Handle observed data -- show pinned observations even when sliders are adjusted,
+            // but respect the user's toggle chip state
             var visibleObs = pinnedObservations || (currentExample ? currentExample.observations : null);
+            var obsEnabled = isChipEnabled('observed');
             if (visibleObs && visibleObs.length > 0) {
                 chart.data.datasets[3].data = visibleObs.map(obs => ({
                     x: obs.r, y: obs.v, err: obs.err || 0
                 }));
-                chart.data.datasets[3].hidden = false;
-                observedLegend.style.display = 'flex';
+                chart.data.datasets[3].hidden = !obsEnabled;
+                observedLegend.style.display = obsEnabled ? 'flex' : 'none';
             } else {
                 chart.data.datasets[3].data = [];
                 chart.data.datasets[3].hidden = true;
@@ -1609,7 +1613,7 @@ function renderCurves(data) {
     const cdmData = [];
     const gfdStructureData = [];
 
-    // Clip GFD+ at the field horizon (R_env)
+    // Clip GFDphi at the field horizon (R_env)
     var rEnv = getGalacticRadius();
 
     for (let i = 0; i < data.radii.length; i++) {
@@ -1883,7 +1887,7 @@ function setMode(mode) {
         // Update header to indicate shape mode
         document.querySelector('.mass-model-header-text').textContent = 'Mass Distribution Shape (masses auto-inferred)';
 
-        // Force GFD and GFD+ chips on and lock them (required for inference)
+        // Force GFD and GFDphi chips on and lock them (required for inference)
         forceChipOn('gfd');
         forceChipOn('gfd_structure');
     }
@@ -2049,11 +2053,22 @@ document.addEventListener('mouseup', () => {
 // Maps each toggle chip's data-series attribute to the Chart.js dataset
 // indices it controls. Toggling a chip shows or hides those datasets.
 
+/**
+ * Check whether a theory toggle chip is currently enabled (checked).
+ * Returns true if the chip is checked or if no chip exists for the key.
+ */
+function isChipEnabled(seriesKey) {
+    var chip = document.querySelector('.theory-chip[data-series="' + seriesKey + '"]');
+    if (!chip) return true;
+    var cb = chip.querySelector('input[type="checkbox"]');
+    return cb ? cb.checked : true;
+}
+
 var theoryDatasetMap = {
     'observed':      [3],       // Observed Data points
     'newtonian':     [0],       // Newtonian Gravity
     'gfd':           [1, 4, 5], // GFD curve + confidence band upper/lower
-    'gfd_structure': [8],       // GFD+
+    'gfd_structure': [8],       // GFDphi
     'mond':          [2],       // Classical MOND
     'cdm':           [7]        // CDM + NFW
 };
@@ -2110,7 +2125,7 @@ function initTheoryToggles() {
             e.preventDefault();
             var seriesKey = this.getAttribute('data-series');
 
-            // In inference mode, GFD and GFD+ are locked on (required
+            // In inference mode, GFD and GFDphi are locked on (required
             // for inference computation). Skip toggle for these chips.
             if (currentMode === 'inference' &&
                 (seriesKey === 'gfd' || seriesKey === 'gfd_structure')) {
@@ -2196,7 +2211,7 @@ function initCrosshairReadout() {
             {key: 'observed',      idx: 3, color: '#FFC107', label: 'Observed'},
             {key: 'newtonian',     idx: 0, color: '#ff6b6b', label: 'Newtonian'},
             {key: 'gfd',           idx: 1, color: '#4da6ff', label: 'GFD'},
-            {key: 'gfd_structure', idx: 8, color: '#76FF03', label: 'GFD+'},
+            {key: 'gfd_structure', idx: 8, color: '#76FF03', label: 'GFD\u03C6'},
             {key: 'mond',          idx: 2, color: '#9966ff', label: 'MOND'},
             {key: 'cdm',           idx: 7, color: '#ffffff', label: 'CDM'}
         ];

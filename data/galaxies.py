@@ -268,7 +268,7 @@ PREDICTION_GALAXIES = [
         "id": "ic2574",
         "name": "IC 2574 (M = 1.1x10^9 M_sun, 92% gas)",
         "distance": 13,
-        "galactic_radius": 13,
+        "galactic_radius": 11,
         "mass": 9.051,
         "accel": 1.0,
         "mass_model": {
@@ -570,7 +570,7 @@ INFERENCE_GALAXIES = [
         "distance": 9,
         "velocity": 66,
         "accel": 1.0,
-        "galactic_radius": 13,
+        "galactic_radius": 11,
         "mass_model": {
             "bulge": {"M": 0, "a": 0.1},
             "disk":  {"M": 9.31e7, "Rd": 1.70},
