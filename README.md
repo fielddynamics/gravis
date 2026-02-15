@@ -6,6 +6,8 @@ Author: Stephen Nelson | Source: [github.com/fielddynamics/gravis](https://githu
 
 Supplemental tool for: Nelson, S. (2026). *Dual Tetrad Topology and the Field Origin: From Nuclear Decay to Galactic Dynamics*.
 
+![GRAVIS Application Screenshot](images/gravis-app.png)
+
 Given only the independently measured baryonic mass distribution of a galaxy (stellar bulge, stellar disk, gas disk), GRAVIS computes the full rotation curve with no dark matter and no free parameters. The characteristic acceleration scale $a_0$ is derived from first principles:
 
 $$a_0 = k^2 \, \frac{G \, m_e}{r_e^2} \approx 1.22 \times 10^{-10} \; \text{m/s}^2$$
@@ -14,13 +16,17 @@ where $k = 4$ is the simplex number for $d = 3$, $m_e$ is the electron mass, and
 
 ## What It Does
 
-**Forward prediction (M -> v):** Supply a three-component baryonic mass model (Hernquist bulge + exponential stellar disk + exponential gas disk) and GRAVIS returns three rotation curves:
+**Forward prediction (M -> v):** Supply a three-component baryonic mass model (Hernquist bulge + exponential stellar disk + exponential gas disk) and GRAVIS returns rotation curves under five frameworks:
 
 - **Newtonian** -- standard $1/r^2$ gravity, baryons only
-- **Dual Tetrad Gravity** -- AQUAL field equation with $\mu(x) = x/(1+x)$, derived from topological closure
+- **GFD (Dual Tetrad Gravity)** -- AQUAL field equation with $\mu(x) = x/(1+x)$, derived from topological closure
+- **GFD\u03C6 (structural release)** -- GFD plus a gas-fraction-scaled structural term from stellated field origins, zero free parameters
 - **Classical MOND** -- AQUAL field equation with $\mu(x) = x/\sqrt{1+x^2}$ (Bekenstein & Milgrom 1984)
+- **CDM + NFW** -- abundance-matched dark matter halo with NFW profile
 
-**Inverse inference (v -> M):** Given an observed circular velocity at a radius, infer the enclosed baryonic mass required by DTG.
+All five theories are rendered simultaneously on the same chart alongside published observational data with error bars, enabling direct visual comparison.
+
+**Inverse inference (v -> M):** Given an observed circular velocity at a radius, infer the enclosed baryonic mass required by DTG. Multi-point consistency analysis propagates errors and computes deviation statistics across all observed radii.
 
 ## Quick Start
 
@@ -49,26 +55,21 @@ gravis/
     mass_model.py         Distributed mass model (Hernquist + exponential)
     newtonian.py          Newtonian gravity: v_c = sqrt(G M(<r) / r)
     aqual.py              DTG solver: mu(x) = x/(1+x), AQUAL field equation
+    equations.py          Unified equation library (GFD, GFDphi, MOND, CDM)
+    engine.py             Multi-stage computation engine
     mond.py               Classical MOND solver: mu(x) = x/sqrt(1+x^2)
+    nfw.py                NFW dark matter halo + abundance matching
     inference.py          Inverse problem: observed v -> inferred M
   api/
     routes.py             REST API endpoints
   data/
-    galaxies.py           Galaxy catalog with observational data
+    galaxies.py           Galaxy catalog (10 galaxies, prediction + inference)
   templates/
-    index.html            Web frontend
+    analysis.html         Main analysis interface
   static/
     css/gravis.css        Stylesheet
     js/gravis.js          Frontend logic (Chart.js)
-  tests/
-    test_constants.py     Physical constant validation
-    test_mass_model.py    Mass distribution tests
-    test_aqual.py         DTG solver tests
-    test_mond.py          MOND solver tests
-    test_inference.py     Round-trip consistency (M -> v -> M)
-    test_milky_way.py     30-test Milky Way validation suite
-    test_api.py           API integration tests
-    test_galaxies.py      Galaxy catalog integrity tests
+  tests/                  400+ tests covering physics, API, and cross-galaxy validation
 ```
 
 ## Physics
@@ -102,16 +103,22 @@ No dark matter halos are used anywhere. All mass parameters come from photometry
 
 ### Included Galaxies
 
-| Galaxy | $M_{\text{baryon}}$ | Type | Sources |
-|--------|---------------------|------|---------|
-| Milky Way | $7.5 \times 10^{10}\;M_\odot$ | SBbc | Bland-Hawthorn+2016, McMillan 2017, Kalberla+2009 |
-| Andromeda (M31) | $1.1 \times 10^{11}\;M_\odot$ | SA(s)b | Tamm+2012, Barmby+2006, Braun+2009 |
-| NGC 3198 | $3.4 \times 10^{10}\;M_\odot$ | SBc | SPARC (Lelli+2016), Begeman 1989 |
-| NGC 2403 | $9.3 \times 10^{9}\;M_\odot$ | SABcd | SPARC (Lelli+2016), Fraternali+2002 |
-| M33 | $5.0 \times 10^{9}\;M_\odot$ | SA(s)cd | Corbelli+2003, Corbelli+2014 |
-| NGC 6503 | $8.7 \times 10^{9}\;M_\odot$ | SA(s)cd | SPARC (Lelli+2016), de Blok+2008 |
+10 galaxies spanning 5 decades in baryonic mass, from giant spirals to gas-dominated dwarfs:
 
-Rotation curve data include 1-sigma error bars from published measurements.
+| Galaxy | $M_{\text{baryon}}$ | Gas Fraction | Sources |
+|--------|---------------------|-------------|---------|
+| UGC 2885 | $2.5 \times 10^{11}\;M_\odot$ | 40% | SPARC (Lelli+2016), Rubin+1980 |
+| Andromeda (M31) | $1.2 \times 10^{11}\;M_\odot$ | 8% | Tamm+2012, Barmby+2006, Braun+2009 |
+| Milky Way | $7.6 \times 10^{10}\;M_\odot$ | 20% | McMillan 2017, Bland-Hawthorn+2016, Kalberla+2009 |
+| NGC 3198 | $3.4 \times 10^{10}\;M_\odot$ | 43% | SPARC (Lelli+2016), Begeman 1989 |
+| NGC 2403 | $9.3 \times 10^{9}\;M_\odot$ | 42% | SPARC (Lelli+2016), Fraternali+2002 |
+| NGC 6503 | $8.7 \times 10^{9}\;M_\odot$ | 27% | SPARC (Lelli+2016), de Blok+2008 |
+| M33 | $7.1 \times 10^{9}\;M_\odot$ | 45% | Corbelli+2003, Corbelli+2014 |
+| IC 2574 | $1.1 \times 10^{9}\;M_\odot$ | 92% | SPARC (Lelli+2016), Oh+2008 (THINGS) |
+| NGC 3109 | $1.1 \times 10^{9}\;M_\odot$ | 91% | SPARC (Lelli+2016), Carignan+1989 |
+| DDO 154 | $4.3 \times 10^{8}\;M_\odot$ | 93% | SPARC (Lelli+2016), Oh+2015 (LITTLE THINGS) |
+
+All rotation curve data include 1-sigma error bars from published measurements. Mass parameters are independently measured from photometry and HI surveys, not fitted to the rotation curves.
 
 ## API
 
