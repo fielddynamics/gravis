@@ -20,13 +20,13 @@ MW_MODEL = {
 
 
 class TestRotationCurveArrayConsistency:
-    """All output arrays from /api/rotation-curve must have equal length
+    """All output arrays from /api/rotation/curve must have equal length
     and contain no NaN or Infinity values."""
 
     def test_all_arrays_equal_length(self, client):
         """radii, newtonian, dtg, mond, cdm, enclosed_mass must all
         have the same number of elements."""
-        resp = client.post("/api/rotation-curve", json={
+        resp = client.post("/api/rotation/curve", json={
             "mass_model": MW_MODEL,
             "max_radius": 30,
             "num_points": 50,
@@ -45,7 +45,7 @@ class TestRotationCurveArrayConsistency:
 
     def test_no_nan_or_inf(self, client):
         """No output value should be NaN or Infinity."""
-        resp = client.post("/api/rotation-curve", json={
+        resp = client.post("/api/rotation/curve", json={
             "mass_model": MW_MODEL,
             "max_radius": 30,
             "num_points": 100,
@@ -59,7 +59,7 @@ class TestRotationCurveArrayConsistency:
 
     def test_radii_evenly_spaced(self, client):
         """Radii should be evenly spaced from max_radius/N to max_radius."""
-        resp = client.post("/api/rotation-curve", json={
+        resp = client.post("/api/rotation/curve", json={
             "mass_model": MW_MODEL,
             "max_radius": 20,
             "num_points": 10,
@@ -83,7 +83,7 @@ class TestExtremeMasses:
             "disk":  {"M": 1.0e4, "Rd": 0.5},
             "gas":   {"M": 0, "Rd": 1.0},
         }
-        resp = client.post("/api/rotation-curve", json={
+        resp = client.post("/api/rotation/curve", json={
             "mass_model": tiny_model,
             "max_radius": 5,
             "num_points": 20,
@@ -102,7 +102,7 @@ class TestExtremeMasses:
             "disk":  {"M": 5.0e13, "Rd": 50.0},
             "gas":   {"M": 3.0e13, "Rd": 100.0},
         }
-        resp = client.post("/api/rotation-curve", json={
+        resp = client.post("/api/rotation/curve", json={
             "mass_model": huge_model,
             "max_radius": 500,
             "num_points": 20,
@@ -117,7 +117,7 @@ class TestExtremeMasses:
         """Very high velocity (500 km/s) and very low (5 km/s)
         should both return valid masses."""
         for v in [5.0, 500.0]:
-            resp = client.post("/api/infer-mass", json={
+            resp = client.post("/api/rotation/infer-mass", json={
                 "r_kpc": 10.0,
                 "v_km_s": v,
                 "accel_ratio": 1.0,
@@ -136,7 +136,7 @@ class TestAccelRatioExtremes:
     def test_near_zero_approaches_newtonian(self, client):
         """With accel_ratio = 0.001 (a0 very small), GFD should be
         nearly identical to Newtonian."""
-        resp = client.post("/api/rotation-curve", json={
+        resp = client.post("/api/rotation/curve", json={
             "mass_model": MW_MODEL,
             "max_radius": 30,
             "num_points": 20,
@@ -152,7 +152,7 @@ class TestAccelRatioExtremes:
     def test_large_accel_ratio_strong_enhancement(self, client):
         """With accel_ratio = 100 (a0 very large), GFD should be
         much larger than Newtonian everywhere."""
-        resp = client.post("/api/rotation-curve", json={
+        resp = client.post("/api/rotation/curve", json={
             "mass_model": MW_MODEL,
             "max_radius": 30,
             "num_points": 20,

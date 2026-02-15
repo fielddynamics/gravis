@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+
+{% block title %}GRAVIS: Architecture{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+    mermaid.initialize({
+        startOnLoad: true,
+        theme: 'dark',
+        themeVariables: {
+            background: 'transparent',
+            primaryColor: '#1e1e1e',
+            primaryTextColor: '#e0e0e0',
+            primaryBorderColor: '#404040',
+            lineColor: '#4da6ff',
+            secondaryColor: '#1a1a1a',
+            tertiaryColor: '#141414',
+            mainBkg: '#1e1e1e',
+            nodeBorder: '#404040',
+            clusterBkg: 'transparent',
+            clusterBorder: '#333333',
+            titleColor: '#909090',
+            edgeLabelBackground: 'transparent',
+            fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif',
+            fontSize: '15px'
+        }
+    });
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="prose-screen">
+    <div class="arch-prose">
+
+        <h1>Application Architecture</h1>
+        <p class="arch-subtitle">
+            GRAVIS is a service-oriented research platform. Each physics domain
+            is an independent service registered at startup, with its own API
+            endpoints, configuration schema, and result format.
+        </p>
+
+        <!-- ============================================================ -->
+        <h2>System Overview</h2>
+
+        <p>
+            The platform follows a <strong>service registry</strong> pattern.
+            At startup, the application creates a <code>GravisRegistry</code>
+            and registers one <code>GravisService</code> for each physics
+            domain. Each service owns its own namespaced API endpoints
+            (e.g. <code>/api/rotation/*</code>), its own validation logic,
+            and its own result format. The registry provides lightweight
+            dependency injection: consumers look up services by ID rather
+            than importing concrete implementations.
+        </p>
+
+        <div class="arch-diagram">
+            <pre class="mermaid">
+graph TD
+    WebApp["GRAVIS Web App"] -->|"REST calls"| apiLayer
+
+    subgraph apiLayer [API Layer]
+        direction LR
+        RotationEP["/api/rotation/*"]
+        RarEP["/api/rar/*"]
+        RedshiftEP["/api/redshift/*"]
+        MoreEP["..."]
+    end
+
+    RotationEP --> RotationService
+    RarEP --> RARService
+    RedshiftEP --> RedshiftService
+    RotationService -->|"runs"| Core["GravisEngine / Shared Core"]
+    RARService -->|"runs"| Core
+    RedshiftService -->|"runs"| Core
+            </pre>
+        </div>
+
+        <div class="arch-callout">
+            <div class="arch-callout-title">Design Principle</div>
+            <p>
+                Adding a new physics domain requires only a new service package
+                and a template. The home dashboard card, the API endpoints, and
+                the registry listing all appear automatically. No changes to
+                <code>api/routes.py</code> or the home template are needed.
+            </p>
+        </div>
+
+        <!-- ============================================================ -->
+        <h2>Service Contract</h2>
+
+        <p>
+            Every physics domain implements the <code>GravisService</code>
+            abstract base class. The contract is intentionally minimal:
+        </p>
+
+        <div class="arch-callout">
+            <div class="arch-callout-title">GravisService Interface</div>
+            <p>
+                <strong>validate(config)</strong> accepts raw request input and
+                returns a normalized, validated configuration dictionary with
+                domain-specific keys.<br>
+                <strong>compute(config)</strong> runs the physics computation
+                and returns a JSON-serializable result dictionary with
+                domain-specific field names.<br>
+                <strong>register_routes(blueprint)</strong> mounts the service's
+                API endpoints onto the Flask blueprint under a namespace
+                matching the service ID.
+            </p>
+        </div>
+
+        <p>
+            The interface is <strong>generic at the boundary, specific
+            inside</strong>. The registry passes dictionaries in and out.
+            Inside each service, all property names are fully typed and
+            domain-specific. The Rotation Service returns fields named
+            <code>dtg</code>, <code>mond</code>, <code>enclosed_mass</code>.
+            A future Redshift Service would return <code>z</code>,
+            <code>luminosity_distance</code>, <code>H_z</code>. No field
+            names are ever genericized.
+        </p>
+
+        <!-- ============================================================ -->
+        <h2>Registered Services</h2>
+
+        <table class="arch-table">
+            <thead>
+                <tr>
+                    <th>Service</th>
+                    <th>Category</th>
+                    <th>Namespace</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>RotationService</td>
+                    <td>Galactic</td>
+                    <td><code>/api/rotation/*</code></td>
+                    <td><span class="arch-status-live">Live</span></td>
+                </tr>
+                <tr>
+                    <td>RARService</td>
+                    <td>Galactic</td>
+                    <td><code>/api/rar/*</code></td>
+                    <td><span class="arch-status-soon">Coming Soon</span></td>
+                </tr>
+                <tr>
+                    <td>RedshiftService</td>
+                    <td>Cosmological</td>
+                    <td><code>/api/redshift/*</code></td>
+                    <td><span class="arch-status-soon">Coming Soon</span></td>
+                </tr>
+                <tr>
+                    <td>SolarService</td>
+                    <td>Cosmological</td>
+                    <td><code>/api/solar/*</code></td>
+                    <td><span class="arch-status-soon">Coming Soon</span></td>
+                </tr>
+                <tr>
+                    <td>ValenceService</td>
+                    <td>Quantum &amp; Nuclear</td>
+                    <td><code>/api/valence/*</code></td>
+                    <td><span class="arch-status-soon">Coming Soon</span></td>
+                </tr>
+                <tr>
+                    <td>A0DerivationService</td>
+                    <td>Quantum &amp; Nuclear</td>
+                    <td><code>/api/a0-derivation/*</code></td>
+                    <td><span class="arch-status-soon">Coming Soon</span></td>
+                </tr>
+                <tr>
+                    <td>NuclearDecayService</td>
+                    <td>Quantum &amp; Nuclear</td>
+                    <td><code>/api/nuclear-decay/*</code></td>
+                    <td><span class="arch-status-soon">Coming Soon</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- ============================================================ -->
+        <h2>Computation Pipeline</h2>
+
+        <p>
+            The Rotation Service demonstrates the standard computation
+            pattern. A <code>GravisEngine</code> orchestrates a sequence of
+            <strong>stages</strong>, where each stage is a named equation
+            with explicit parameters. The engine first computes the enclosed
+            baryonic mass at every radius, then passes those masses through
+            each theory stage in order.
+        </p>
+
+        <div class="arch-pipeline">
+            <div class="arch-pipeline-step">
+                <div class="arch-pipeline-step-label">Input</div>
+                <div class="arch-pipeline-step-name">GravisConfig</div>
+            </div>
+            <div class="arch-pipeline-arrow">&#8594;</div>
+            <div class="arch-pipeline-step">
+                <div class="arch-pipeline-step-label">Stage 0</div>
+                <div class="arch-pipeline-step-name">Mass Model</div>
+            </div>
+            <div class="arch-pipeline-arrow">&#8594;</div>
+            <div class="arch-pipeline-step">
+                <div class="arch-pipeline-step-label">Stage 1..N</div>
+                <div class="arch-pipeline-step-name">Theory Stages</div>
+            </div>
+            <div class="arch-pipeline-arrow">&#8594;</div>
+            <div class="arch-pipeline-step">
+                <div class="arch-pipeline-step-label">Output</div>
+                <div class="arch-pipeline-step-name">GravisResult</div>
+            </div>
+        </div>
+
+        <p>
+            Each stage is a <code>GravisStage</code> instance that wraps a
+            callable equation. When the engine runs, each stage records three
+            things into a <code>StageResult</code>:
+        </p>
+
+        <div class="arch-callout">
+            <div class="arch-callout-title">StageResult: The Audit Record</div>
+            <p>
+                <strong>equation_label</strong>: a human-readable string
+                identifying which equation was used
+                (e.g. <code>x^2/(1+x) = g_N/a0</code>).<br>
+                <strong>parameters</strong>: the exact parameter values that
+                were passed to the equation
+                (e.g. <code>accel_ratio: 1.0</code>).<br>
+                <strong>series</strong>: the output value at every sample
+                point (e.g. velocity in km/s at each radius).<br>
+                <strong>intermediates</strong>: every internal variable at
+                every sample point (e.g. <code>g_N</code>, <code>y_N</code>,
+                <code>x</code>, <code>g_eff</code> for the GFD stage).
+            </p>
+        </div>
+
+        <p>
+            This design makes the entire computation chain
+            <strong>auditable</strong>: given a result, you can trace back
+            through each stage to see the exact equation, the exact
+            parameters, and every intermediate value. It also makes the
+            pipeline <strong>testable</strong>: each stage can be tested in
+            isolation by passing known radii and masses, then asserting on
+            the output series and intermediates.
+        </p>
+
+        <div class="arch-diagram">
+            <pre class="mermaid">
+graph TD
+    Config[GravisConfig] -->|radii| MassStage[Mass Model Stage]
+    MassStage -->|"enclosed masses"| Newton[Newtonian]
+    MassStage -->|"enclosed masses"| GFD[GFD]
+    MassStage -->|"enclosed masses"| GFDphi[GFD Structure]
+    MassStage -->|"enclosed masses"| MOND[MOND]
+    MassStage -->|"enclosed masses"| CDM[CDM+NFW]
+
+    Newton --> Result
+    GFD --> Result
+    GFDphi --> Result
+    MOND --> Result
+    CDM --> Result
+
+    subgraph Result [GravisResult]
+        direction LR
+        EQ[equation_label] ~~~ Params[parameters] ~~~ Series[series] ~~~ Inter[intermediates]
+    end
+            </pre>
+        </div>
+
+        <!-- ============================================================ -->
+        <h2>API Endpoint Namespacing</h2>
+
+        <p>
+            Each service owns its API endpoints under
+            <code>/api/&lt;service_id&gt;/</code>. This follows the
+            <strong>Single Responsibility Principle</strong>: each service
+            defines its own routes, validation, and error handling. No
+            generic <code>/compute</code> endpoint exists. The Rotation
+            Service, for example, registers six endpoints:
+        </p>
+
+        <table class="arch-table">
+            <thead>
+                <tr>
+                    <th>Method</th>
+                    <th>Endpoint</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>POST</td>
+                    <td><code>/api/rotation/curve</code></td>
+                    <td>Compute rotation curves for a mass model</td>
+                </tr>
+                <tr>
+                    <td>POST</td>
+                    <td><code>/api/rotation/infer-mass</code></td>
+                    <td>Single-point mass inference from velocity</td>
+                </tr>
+                <tr>
+                    <td>POST</td>
+                    <td><code>/api/rotation/infer-mass-model</code></td>
+                    <td>Infer scaled mass model from observation</td>
+                </tr>
+                <tr>
+                    <td>POST</td>
+                    <td><code>/api/rotation/infer-mass-multi</code></td>
+                    <td>Multi-point inference consistency analysis</td>
+                </tr>
+                <tr>
+                    <td>GET</td>
+                    <td><code>/api/rotation/galaxies</code></td>
+                    <td>List all galaxies in the catalog</td>
+                </tr>
+                <tr>
+                    <td>GET</td>
+                    <td><code>/api/rotation/galaxies/&lt;id&gt;</code></td>
+                    <td>Get single galaxy details</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>
+            Two shared endpoints live outside any service namespace:
+            <code>GET /api/registry</code> returns metadata for all
+            registered services, and <code>GET /api/constants</code> returns
+            the physical constants used across the platform.
+        </p>
+
+        <!-- ============================================================ -->
+        <h2>Project Structure</h2>
+
+        <div class="arch-callout">
+            <div class="arch-callout-title">Key Directories</div>
+            <p>
+                <code>physics/services/</code> contains the service registry,
+                the <code>GravisService</code> base class, and one package
+                per physics domain.<br>
+                <code>physics/core.py</code> provides shared pipeline building
+                blocks: <code>GravisStage</code>, <code>StageResult</code>,
+                and <code>PipelineRunner</code>.<br>
+                <code>physics/engine.py</code> is the rotation-specific pipeline
+                orchestrator: <code>GravisConfig</code>,
+                <code>GravisEngine</code>, and <code>GravisResult</code>.<br>
+                <code>physics/equations.py</code> contains all traced equation
+                callables shared across services.<br>
+                <code>api/routes.py</code> creates the API blueprint and
+                delegates to each live service's
+                <code>register_routes()</code>.<br>
+                <code>data/galaxies.py</code> is the galaxy catalog with mass
+                models and observational data.
+            </p>
+        </div>
+
+        <!-- ============================================================ -->
+        <h2>Extending the Platform</h2>
+
+        <p>
+            To add a new physics service:
+        </p>
+
+        <p>
+            <strong>1.</strong> Create a new package under
+            <code>physics/services/</code> that implements
+            <code>GravisService</code> with <code>validate()</code>,
+            <code>compute()</code>, and <code>register_routes()</code>.<br>
+            <strong>2.</strong> Register the service in
+            <code>app.py create_registry()</code>.<br>
+            <strong>3.</strong> Create an HTML template for the frontend
+            page.<br>
+            <strong>4.</strong> Add a page route in
+            <code>app.py create_app()</code>.
+        </p>
+
+        <p>
+            The home dashboard card appears automatically from the registry.
+            The API endpoints appear automatically from
+            <code>register_routes()</code>. No changes to
+            <code>api/routes.py</code> or the home template are required.
+        </p>
+
+    </div>
+</div>
+{% endblock %}

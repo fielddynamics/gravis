@@ -11,10 +11,10 @@ import pytest
 
 
 class TestGalaxiesEndpoint:
-    """Test GET /api/galaxies."""
+    """Test GET /api/rotation/galaxies."""
 
     def test_list_galaxies(self, client):
-        resp = client.get("/api/galaxies")
+        resp = client.get("/api/rotation/galaxies")
         assert resp.status_code == 200
         data = resp.get_json()
         assert "prediction" in data
@@ -23,7 +23,7 @@ class TestGalaxiesEndpoint:
         assert len(data["inference"]) >= 4
 
     def test_galaxy_by_id(self, client):
-        resp = client.get("/api/galaxies/milky_way")
+        resp = client.get("/api/rotation/galaxies/milky_way")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["id"] == "milky_way"
@@ -31,12 +31,12 @@ class TestGalaxiesEndpoint:
         assert "observations" in data
 
     def test_galaxy_not_found(self, client):
-        resp = client.get("/api/galaxies/nonexistent")
+        resp = client.get("/api/rotation/galaxies/nonexistent")
         assert resp.status_code == 404
 
 
 class TestRotationCurveEndpoint:
-    """Test POST /api/rotation-curve."""
+    """Test POST /api/rotation/curve."""
 
     def test_milky_way_curve(self, client):
         payload = {
@@ -50,7 +50,7 @@ class TestRotationCurveEndpoint:
             }
         }
         resp = client.post(
-            "/api/rotation-curve",
+            "/api/rotation/curve",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -76,7 +76,7 @@ class TestRotationCurveEndpoint:
             }
         }
         resp = client.post(
-            "/api/rotation-curve",
+            "/api/rotation/curve",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -97,7 +97,7 @@ class TestRotationCurveEndpoint:
             }
         }
         resp = client.post(
-            "/api/rotation-curve",
+            "/api/rotation/curve",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -112,7 +112,7 @@ class TestRotationCurveEndpoint:
     def test_missing_mass_model(self, client):
         payload = {"max_radius": 30, "num_points": 50}
         resp = client.post(
-            "/api/rotation-curve",
+            "/api/rotation/curve",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -131,7 +131,7 @@ class TestRotationCurveEndpoint:
             }
         }
         resp = client.post(
-            "/api/rotation-curve",
+            "/api/rotation/curve",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -140,7 +140,7 @@ class TestRotationCurveEndpoint:
 
 
 class TestInferMassEndpoint:
-    """Test POST /api/infer-mass."""
+    """Test POST /api/rotation/infer-mass."""
 
     def test_milky_way_inference(self, client):
         payload = {
@@ -149,7 +149,7 @@ class TestInferMassEndpoint:
             "accel_ratio": 1.0
         }
         resp = client.post(
-            "/api/infer-mass",
+            "/api/rotation/infer-mass",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -167,7 +167,7 @@ class TestInferMassEndpoint:
             "accel_ratio": 1.0
         }
         resp = client.post(
-            "/api/infer-mass",
+            "/api/rotation/infer-mass",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -176,7 +176,7 @@ class TestInferMassEndpoint:
 
 
 class TestInferMassModelEndpoint:
-    """Test POST /api/infer-mass-model."""
+    """Test POST /api/rotation/infer-mass-model."""
 
     MW_PAYLOAD = {
         "r_kpc": 8.0,
@@ -191,7 +191,7 @@ class TestInferMassModelEndpoint:
 
     def test_basic_response_structure(self, client):
         resp = client.post(
-            "/api/infer-mass-model",
+            "/api/rotation/infer-mass-model",
             data=json.dumps(self.MW_PAYLOAD),
             content_type="application/json",
         )
@@ -207,7 +207,7 @@ class TestInferMassModelEndpoint:
 
     def test_inferred_model_has_components(self, client):
         resp = client.post(
-            "/api/infer-mass-model",
+            "/api/rotation/infer-mass-model",
             data=json.dumps(self.MW_PAYLOAD),
             content_type="application/json",
         )
@@ -224,7 +224,7 @@ class TestInferMassModelEndpoint:
     def test_scale_preserves_proportions(self, client):
         """Component masses should maintain their relative proportions."""
         resp = client.post(
-            "/api/infer-mass-model",
+            "/api/rotation/infer-mass-model",
             data=json.dumps(self.MW_PAYLOAD),
             content_type="application/json",
         )
@@ -238,7 +238,7 @@ class TestInferMassModelEndpoint:
     def test_milky_way_total_reasonable(self, client):
         """MW inference should give order 10^10 M_sun total."""
         resp = client.post(
-            "/api/infer-mass-model",
+            "/api/rotation/infer-mass-model",
             data=json.dumps(self.MW_PAYLOAD),
             content_type="application/json",
         )
@@ -248,7 +248,7 @@ class TestInferMassModelEndpoint:
     def test_btfr_mass_reasonable(self, client):
         """BTFR mass for MW (230 km/s) should be ~10^10 M_sun."""
         resp = client.post(
-            "/api/infer-mass-model",
+            "/api/rotation/infer-mass-model",
             data=json.dumps(self.MW_PAYLOAD),
             content_type="application/json",
         )
@@ -258,7 +258,7 @@ class TestInferMassModelEndpoint:
     def test_missing_mass_model(self, client):
         payload = {"r_kpc": 8.0, "v_km_s": 230.0}
         resp = client.post(
-            "/api/infer-mass-model",
+            "/api/rotation/infer-mass-model",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -277,12 +277,45 @@ class TestInferMassModelEndpoint:
                 "gas":   {"M": 1.0e10, "Rd": 10.0}
             }
         }
-        resp1 = client.post("/api/infer-mass-model", data=json.dumps(payload1), content_type="application/json")
-        resp2 = client.post("/api/infer-mass-model", data=json.dumps(payload2), content_type="application/json")
+        resp1 = client.post("/api/rotation/infer-mass-model", data=json.dumps(payload1), content_type="application/json")
+        resp2 = client.post("/api/rotation/infer-mass-model", data=json.dumps(payload2), content_type="application/json")
         total1 = resp1.get_json()["inferred_total"]
         total2 = resp2.get_json()["inferred_total"]
         # More extended disk => less mass enclosed at 8 kpc => higher total needed
         assert total2 > total1
+
+
+class TestRegistryEndpoint:
+    """Test GET /api/registry."""
+
+    def test_list_services(self, client):
+        resp = client.get("/api/registry")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert isinstance(data, list)
+        assert len(data) >= 7
+        ids = [s["id"] for s in data]
+        assert "rotation" in ids
+        assert "rar" in ids
+        assert "redshift" in ids
+
+    def test_service_metadata_fields(self, client):
+        resp = client.get("/api/registry")
+        data = resp.get_json()
+        for svc in data:
+            assert "id" in svc
+            assert "name" in svc
+            assert "description" in svc
+            assert "category" in svc
+            assert "status" in svc
+            assert "route" in svc
+
+    def test_rotation_is_live(self, client):
+        resp = client.get("/api/registry")
+        data = resp.get_json()
+        rotation = [s for s in data if s["id"] == "rotation"][0]
+        assert rotation["status"] == "live"
+        assert rotation["route"] == "/analysis"
 
 
 class TestConstantsEndpoint:

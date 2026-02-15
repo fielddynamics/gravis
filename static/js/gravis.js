@@ -3,8 +3,8 @@
  * Frontend JavaScript: fetches rotation curve data from Flask API,
  * renders charts with Chart.js.
  *
- * All physics computations happen server-side via /api/rotation-curve
- * and /api/infer-mass-model. The frontend handles only:
+ * All physics computations happen server-side via /api/rotation/curve
+ * and /api/rotation/infer-mass-model. The frontend handles only:
  *   - UI state management (sliders, dropdowns, mode toggle)
  *   - Chart rendering (Chart.js with error bar plugin)
  *   - API communication
@@ -908,7 +908,7 @@ async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations
     if (galacticRadius) {
         body.galactic_radius = galacticRadius;
     }
-    const resp = await fetch('/api/rotation-curve', {
+    const resp = await fetch('/api/rotation/curve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -918,7 +918,7 @@ async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations
 }
 
 async function fetchInferredMassModel(rKpc, vKmS, accelRatio, massModel) {
-    const resp = await fetch('/api/infer-mass-model', {
+    const resp = await fetch('/api/rotation/infer-mass-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -933,13 +933,13 @@ async function fetchInferredMassModel(rKpc, vKmS, accelRatio, massModel) {
 }
 
 async function fetchGalaxies() {
-    const resp = await fetch('/api/galaxies');
+    const resp = await fetch('/api/rotation/galaxies');
     if (!resp.ok) throw new Error('API error: ' + resp.status);
     return resp.json();
 }
 
 async function fetchMultiPointInference(observations, accelRatio, massModel) {
-    const resp = await fetch('/api/infer-mass-multi', {
+    const resp = await fetch('/api/rotation/infer-mass-multi', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -12,10 +12,17 @@
     <nav class="nav-bar">
         <a class="nav-logo" href="/" style="text-decoration: none;">GRAVIS</a>
         <div class="nav-items">
-            <a class="nav-item {% if active_page == 'analysis' %}active{% endif %}" href="/" style="text-decoration: none;">Analysis</a>
+            <a class="nav-item {% if active_page == 'home' %}active{% endif %}" href="/" style="text-decoration: none;">Home</a>
             <a class="nav-item {% if active_page == 'field' %}active{% endif %}" href="/field" style="text-decoration: none;">The Gravity Field</a>
-            <a class="nav-item {% if active_page == 'faq' %}active{% endif %}" href="/faq" style="text-decoration: none;">FAQ</a>
-            <a class="nav-item nav-item-right {% if active_page == 'about' %}active{% endif %}" href="/about" style="text-decoration: none;">About</a>
+            <a class="nav-item nav-item-right {% if active_page == 'faq' %}active{% endif %}" href="/faq" style="text-decoration: none;">FAQ</a>
+            <div class="nav-dropdown">
+                <span class="nav-item {% if active_page == 'about' %}active{% endif %}">Help</span>
+                <div class="nav-dropdown-menu">
+                    <a class="nav-dropdown-item" href="/about">About</a>
+                    <div class="nav-dropdown-divider"></div>
+                    <span class="nav-dropdown-version">GRAVIS v{{ version }}</span>
+                </div>
+            </div>
         </div>
     </nav>
     {% block content %}{% endblock %}

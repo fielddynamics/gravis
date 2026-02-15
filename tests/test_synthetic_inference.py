@@ -60,7 +60,7 @@ class TestPerfectDataZeroResiduals:
         """All delta_v values should be ~0 for perfect synthetic data."""
         radii = [2, 5, 8, 10, 15, 20, 25]
         obs = _make_perfect_observations(TEST_MODEL, radii)
-        resp = client.post("/api/infer-mass-multi", json={
+        resp = client.post("/api/rotation/infer-mass-multi", json={
             "observations": obs,
             "mass_model": TEST_MODEL,
             "accel_ratio": 1.0,
@@ -75,7 +75,7 @@ class TestPerfectDataZeroResiduals:
         """All sigma_dev values should be ~0 for perfect data."""
         radii = [2, 5, 8, 10, 15, 20, 25]
         obs = _make_perfect_observations(TEST_MODEL, radii)
-        resp = client.post("/api/infer-mass-multi", json={
+        resp = client.post("/api/rotation/infer-mass-multi", json={
             "observations": obs,
             "mass_model": TEST_MODEL,
             "accel_ratio": 1.0,
@@ -90,7 +90,7 @@ class TestPerfectDataZeroResiduals:
         """The mass offset (weighted mean vs model total) should be ~0%."""
         radii = [2, 5, 8, 10, 15, 20, 25]
         obs = _make_perfect_observations(TEST_MODEL, radii)
-        resp = client.post("/api/infer-mass-multi", json={
+        resp = client.post("/api/rotation/infer-mass-multi", json={
             "observations": obs,
             "mass_model": TEST_MODEL,
             "accel_ratio": 1.0,
@@ -110,7 +110,7 @@ class TestKnownMassOffsetDetected:
         The inferred masses should average ~10% above the reference model."""
         radii = [5, 8, 10, 15, 20]
         obs = _make_scaled_observations(TEST_MODEL, radii, scale=1.10)
-        resp = client.post("/api/infer-mass-multi", json={
+        resp = client.post("/api/rotation/infer-mass-multi", json={
             "observations": obs,
             "mass_model": TEST_MODEL,
             "accel_ratio": 1.0,
@@ -139,7 +139,7 @@ class TestWrongShapeTriggersdiagnostic:
         radii = [2, 4, 6, 8, 10, 15, 20, 25]
         obs = _make_perfect_observations(wrong_shape, radii)
 
-        resp = client.post("/api/infer-mass-multi", json={
+        resp = client.post("/api/rotation/infer-mass-multi", json={
             "observations": obs,
             "mass_model": TEST_MODEL,  # Reference model with Rd=2.5
             "accel_ratio": 1.0,
@@ -173,7 +173,7 @@ class TestWeightedStatisticsHandComputed:
         radii = [5, 10, 20]
         obs = _make_perfect_observations(simple_model, radii, err=3.0)
 
-        resp = client.post("/api/infer-mass-multi", json={
+        resp = client.post("/api/rotation/infer-mass-multi", json={
             "observations": obs,
             "mass_model": simple_model,
             "accel_ratio": 1.0,

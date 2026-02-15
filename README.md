@@ -1,4 +1,4 @@
-# GRAVIS: Galactic Rotation from Field Dynamics
+# GRAVIS: Gravity Field Dynamics Research Platform
 
 A zero-parameter rotation curve prediction tool using **Gravity Field Dynamics**, implementing the **Dual Tetrad Gravity** (DTG) covariant completion.
 

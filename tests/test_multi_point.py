@@ -1,5 +1,5 @@
 """
-Tests for multi-point inference endpoint (/api/infer-mass-multi).
+Tests for multi-point inference endpoint (/api/rotation/infer-mass-multi).
 
 Validates per-point delta-v, sigma, enclosed fractions, aggregate
 statistics, band methods, and shape diagnostic -- all computed
@@ -51,14 +51,14 @@ MW_OBS = [
 
 
 def _post_multi(client, mass_model, observations, accel_ratio=1.0):
-    """Helper to POST to /api/infer-mass-multi."""
+    """Helper to POST to /api/rotation/infer-mass-multi."""
     payload = {
         "mass_model": mass_model,
         "observations": observations,
         "accel_ratio": accel_ratio,
     }
     resp = client.post(
-        "/api/infer-mass-multi",
+        "/api/rotation/infer-mass-multi",
         data=json.dumps(payload),
         content_type="application/json",
     )
@@ -358,7 +358,7 @@ class TestEdgeCases:
     def test_missing_mass_model(self, client):
         payload = {"observations": NGC3198_OBS}
         resp = client.post(
-            "/api/infer-mass-multi",
+            "/api/rotation/infer-mass-multi",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -367,7 +367,7 @@ class TestEdgeCases:
     def test_missing_observations(self, client):
         payload = {"mass_model": NGC3198_MASS_MODEL}
         resp = client.post(
-            "/api/infer-mass-multi",
+            "/api/rotation/infer-mass-multi",
             data=json.dumps(payload),
             content_type="application/json",
         )
