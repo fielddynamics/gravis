@@ -1515,7 +1515,7 @@ async function updateChart() {
             // Update mass sliders to show the inferred (scaled) values
             // but only update masses, not scale lengths (user controls the shape)
             const scaledModel = inferResult.inferred_mass_model;
-            if (scaledModel && !isLoadingExample) {
+            if (scaledModel) {
                 // Silently update mass slider positions without triggering events
                 if (scaledModel.bulge && scaledModel.bulge.M > 0)
                     bulgeMassSlider.value = Math.log10(Math.max(scaledModel.bulge.M, 1e7));
