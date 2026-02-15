@@ -12,7 +12,8 @@ Usage:
 
 __version__ = "0.1.0"
 
-from flask import Flask, render_template
+import os
+from flask import Flask, render_template, abort, send_from_directory
 
 from physics.services import GravisRegistry
 from physics.services.rotation import RotationService
@@ -94,10 +95,26 @@ def create_app():
     def faq():
         return render_template("faq.html", active_page="faq")
 
+    # Redshift Dynamics page (TF evolution, H(z), distance calculations)
+    @app.route("/redshift")
+    def redshift():
+        return render_template("redshift.html", active_page="redshift")
+
     # Architecture overview page
     @app.route("/architecture")
     def architecture():
         return render_template("architecture.html", active_page="architecture")
+
+    # Document viewer: serve raw markdown from docs/ folder
+    @app.route("/api/doc/<path:name>")
+    def serve_doc(name):
+        docs_dir = os.path.join(app.root_path, "docs")
+        if not name.endswith(".md"):
+            name += ".md"
+        filepath = os.path.join(docs_dir, name)
+        if not os.path.isfile(filepath):
+            abort(404)
+        return send_from_directory(docs_dir, name, mimetype="text/markdown")
 
     return app
 

@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}GRAVIS: Redshift Dynamics{% endblock %}
+
+{% block head %}
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+{% endblock %}
+
+{% block content %}
+    <div class="screen-container">
+        <div class="screen active" id="screen-redshift" style="display: flex; flex-direction: column;">
+
+            <!-- Command Bar -->
+            <div class="command-bar" id="command-bar">
+                <div class="command-bar-left">
+                    <div class="command-mode-toggle">
+                        <button class="mode-button active" id="mode-tf" onclick="setMode('tf')">
+                            TF Evolution
+                        </button>
+                        <button class="mode-button" id="mode-hubble" onclick="setMode('hubble')">
+                            Hubble Tension
+                        </button>
+                    </div>
+                    <div class="command-separator"></div>
+                    <div class="command-galaxy" id="examples-group">
+                        <select class="command-dropdown" id="examples-dropdown" onchange="loadExample()">
+                        </select>
+                    </div>
+                </div>
+                <div class="command-bar-right">
+                    <div class="command-distance" id="redshift-slider-group">
+                        <span class="command-label">Redshift</span>
+                        <input type="range" id="redshift-slider" min="0" max="4" step="0.01" value="2"
+                               class="command-slider">
+                        <span class="command-value" id="redshift-value">z = 2.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main content: sidebar + chart -->
+            <div class="analysis-body">
+                <div class="left-panel" id="left-panel">
+
+                    <!-- Related Documents -->
+                    <div class="doc-list-section" id="doc-list-section">
+                        <div class="doc-list-header">Documents</div>
+                        <ul class="doc-list">
+                            <li class="doc-list-item" onclick="GravisDoc.open('tf-evolution')">
+                                <span class="doc-list-icon">&#9776;</span>
+                                <span class="doc-list-name">Tully-Fisher Evolution</span>
+                            </li>
+                            <li class="doc-list-item" onclick="GravisDoc.open('hubble-tension')">
+                                <span class="doc-list-icon">&#9776;</span>
+                                <span class="doc-list-name">The Hubble Tension</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Cosmological Parameters -->
+                    <div class="mass-model-section" id="cosmo-params-section">
+                        <div class="mass-model-header" style="cursor: default;">
+                            <span class="mass-model-header-text">Cosmological Parameters</span>
+                        </div>
+                        <div class="mass-model-content expanded" id="cosmo-params-content">
+                            <div class="mass-model-body">
+                                <div class="control-group">
+                                    <div class="control-label">
+                                        <span>H<sub>0</sub> (Hubble Constant)</span>
+                                        <span class="control-value" id="h0-value">70.0 km/s/Mpc</span>
+                                    </div>
+                                    <input type="range" id="h0-slider" min="60" max="80" step="0.1" value="70">
+                                    <div style="margin-top: 6px; font-size: 0.82em; line-height: 1.7;">
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span style="color: #606060;">GFD H (tree-level):</span>
+                                            <span style="color: rgba(77,166,255,0.6);">70.21 km/s/Mpc</span>
+                                        </div>
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span style="color: #606060;">GFD H (one-loop &#945;/2&#960;):</span>
+                                            <span style="color: #4da6ff;">70.29 km/s/Mpc</span>
+                                        </div>
+                                        <div style="color: #404040; font-size: 0.9em; margin-top: 2px;">Derivation in hubble-tension.md (above)</div>
+                                    </div>
+                                </div>
+                                <div class="control-group" style="margin-top: 10px;">
+                                    <div class="control-label">
+                                        <span>Gravity Lens Throughput</span>
+                                        <span class="control-value" id="lens-value">+/- 6.2%</span>
+                                    </div>
+                                    <input type="range" id="lens-slider" min="0" max="15" step="0.1" value="6.2">
+                                    <div style="font-size: 0.75em; color: #505050; line-height: 1.6; margin-top: 2px;">
+                                        Derived: (k/&#960;)<sup>1/4</sup> = 1.062 at k = 4
+                                        <div style="margin-top: 3px; color: #404040;">Topological constraint from k = 4 field packing. Not a fit parameter.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Object Parameters (read-only, set by example selection) -->
+                    <div class="mass-model-section" id="object-params-section">
+                        <div class="mass-model-header" style="cursor: default;">
+                            <span class="mass-model-header-text">Object Parameters</span>
+                        </div>
+                        <div class="mass-model-content expanded" id="object-params-content">
+                            <div class="mass-model-body">
+                                <div class="control-group">
+                                    <div class="control-label">
+                                        <span>Local Velocity v(0)</span>
+                                        <span class="control-value" id="v0-value">220 km/s</span>
+                                    </div>
+                                    <input type="range" id="v0-slider" min="50" max="400" step="1" value="220" disabled style="opacity: 0.4; pointer-events: none;">
+                                    <span style="font-size: 0.75em; color: #404040;">Set by example selection</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GFD Theory Card -->
+                    <div class="mass-model-section" id="gfd-theory-section">
+                        <div class="mass-model-header" style="cursor: default;">
+                            <span class="mass-model-header-text">Tully-Fisher Evolution</span>
+                        </div>
+                        <div class="mass-model-content expanded">
+                            <div class="mass-model-body" style="font-size: 0.85em; line-height: 1.7; color: #b0b0b0;">
+                                <div style="margin-bottom: 6px; color: #909090;">
+                                    The chart plots how a galaxy's rotation velocity changes with redshift, normalized to its local value.
+                                </div>
+                                <div style="margin-bottom: 8px;">
+                                    <span style="color: #808080;">GFD:</span>
+                                    <span style="color: #4da6ff; font-weight: 600;">v(z)/v(0) = [H(z)/H<sub>0</sub>]<sup>0.17</sup></span>
+                                </div>
+                                <div style="margin-bottom: 8px; color: #707070; font-size: 0.92em;">
+                                    The exponent <span style="color: #e0e0e0; font-weight: 600;">0.17</span> is derived from the covariant completion (not fitted). It predicts galaxies at higher redshift rotate faster, because H(z) > H<sub>0</sub>. This is the <span style="color: #4da6ff;">blue curve</span> on the chart.
+                                </div>
+                                <div style="margin-bottom: 4px;">
+                                    <span style="color: #808080;">Lambda-CDM:</span>
+                                    <span style="color: #999; font-weight: 600;">v(z)/v(0) = 1.0</span>
+                                    <span style="color: #505050; font-size: 0.85em;">(flat, no evolution)</span>
+                                </div>
+                                <div style="color: #505050; font-size: 0.88em;">
+                                    The <span style="color: #999;">dashed line</span> at 1.0 is the standard model prediction: rotation velocities do not change with redshift.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Computed Results -->
+                    <div class="inference-result" id="computed-results" style="display: block;">
+                        <strong style="color: #4da6ff;">Computed at z = <span id="result-z">2.00</span></strong>
+                        <div style="margin-top: 10px; font-size: 0.85em; line-height: 1.8; color: #b0b0b0;">
+                            <div>
+                                <span style="color: #808080;">H(z):</span>
+                                <span id="result-hz" style="color: #e0e0e0;">--</span> km/s/Mpc
+                            </div>
+                            <div>
+                                <span style="color: #808080;">v(z)/v(0):</span>
+                                <span id="result-ratio" style="color: #4da6ff; font-weight: 600;">--</span>
+                            </div>
+                            <div>
+                                <span style="color: #808080;">v(z):</span>
+                                <span id="result-vz" style="color: #4da6ff; font-weight: 600;">--</span> km/s
+                            </div>
+                            <div>
+                                <span style="color: #808080;">Velocity change:</span>
+                                <span id="result-delta-pct" style="color: #4caf50; font-weight: 600;">--</span>
+                            </div>
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #333;">
+                                <span style="color: #808080;">Comoving distance:</span>
+                                <span id="result-dc" style="color: #e0e0e0;">--</span> Mpc
+                            </div>
+                            <div>
+                                <span style="color: #808080;">Luminosity distance:</span>
+                                <span id="result-dl" style="color: #e0e0e0;">--</span> Mpc
+                            </div>
+                            <div>
+                                <span style="color: #808080;">Angular diameter dist:</span>
+                                <span id="result-da" style="color: #e0e0e0;">--</span> Mpc
+                            </div>
+                            <div>
+                                <span style="color: #808080;">Lookback time:</span>
+                                <span id="result-tlb" style="color: #e0e0e0;">--</span> Gyr
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="resize-handle" id="resize-handle"></div>
+
+                <div class="right-panel">
+                    <!-- Theory Toggle Bar: TF mode -->
+                    <div class="theory-toggles" id="theory-toggles-tf">
+                        <span class="theory-toggles-label">Plot</span>
+                        <label class="theory-chip active" data-series="gfd" style="--chip-color: #4da6ff;" title="GFD covariant completion: v(z)/v(0) = [H(z)/H0]^0.17">
+                            <input type="checkbox" checked> GFD
+                        </label>
+                        <label class="theory-chip active" data-series="lcdm" style="--chip-color: #ffffff;" title="Lambda-CDM: no Tully-Fisher evolution with redshift">
+                            <input type="checkbox" checked> &#923;CDM
+                        </label>
+                        <label class="theory-chip active" data-series="observed" style="--chip-color: #FFC107;" title="Published high-z TF measurements">
+                            <input type="checkbox" checked> Observed Data
+                        </label>
+                        <label class="theory-chip active" data-series="cage" style="--chip-color: #4da6ff33;" title="Measurement uncertainty cage around GFD prediction">
+                            <input type="checkbox" checked> Uncertainty Band
+                        </label>
+                    </div>
+                    <!-- Theory Toggle Bar: Hubble mode -->
+                    <div class="theory-toggles" id="theory-toggles-hubble" style="display: none;">
+                        <span class="theory-toggles-label">Plot</span>
+                        <label class="theory-chip active" data-series="h-gfd" style="--chip-color: #4da6ff;" title="GFD derived H0: tree-level 70.21, one-loop 70.29 km/s/Mpc">
+                            <input type="checkbox" checked> GFD
+                        </label>
+                        <label class="theory-chip active" data-series="h-mond" style="--chip-color: #9966ff;" title="MOND empirical H0 from a0 = cH/(2pi), without topological correction">
+                            <input type="checkbox" checked> MOND
+                        </label>
+                        <label class="theory-chip active" data-series="h-obs" style="--chip-color: #FFC107;" title="Published H0 measurements from independent methods">
+                            <input type="checkbox" checked> Observed
+                        </label>
+                        <label class="theory-chip active" data-series="h-slider" style="--chip-color: #FFC107;" title="Interactive H0 slider value">
+                            <input type="checkbox" checked> H0 Slider
+                        </label>
+                    </div>
+
+                    <div class="chart-container">
+                        <div id="chart-face" class="card-face">
+                            <canvas id="tfCanvas"></canvas>
+                            <canvas id="hubbleCanvas"></canvas>
+                            <button id="reset-zoom-btn" class="reset-zoom-button" style="display: none;">
+                                &#x1F504; Reset Zoom
+                            </button>
+                            <button id="data-card-btn" class="data-card-button" style="display: none;"
+                                    onclick="openDataCard()">Data Sources</button>
+                        </div>
+                        <div id="data-face" class="card-face" style="display: none;">
+                            <button class="data-card-button" onclick="closeDataCard()">Back to Chart</button>
+                            <div class="data-card-body">
+                                <h2 id="dc-title" class="dc-title">Tully-Fisher Velocity Evolution Data</h2>
+                                <div id="dc-summary" class="dc-section"></div>
+
+                                <h3>Observed TF Measurements</h3>
+                                <table class="dc-table">
+                                    <thead>
+                                        <tr><th>Redshift z</th><th>v(z)/v(0)</th><th>Source</th></tr>
+                                    </thead>
+                                    <tbody id="dc-obs-tbody"></tbody>
+                                </table>
+
+                                <h3>References</h3>
+                                <ul id="dc-references" class="dc-references"></ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script defer src="{{ url_for('static', filename='js/redshift.js') }}"></script>
+{% endblock %}

@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}GRAVIS{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/gravis.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js" defer></script>
+    <script src="{{ url_for('static', filename='js/gravis-docview.js') }}" defer></script>
     {% block head %}{% endblock %}
 </head>
 <body style="display: flex; flex-direction: column; height: 100vh; overflow: hidden;">
