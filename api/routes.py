@@ -21,6 +21,7 @@ from physics.aqual import velocity as dtg_velocity
 from physics.mond import velocity as mond_velocity
 from physics.inference import infer_mass
 from physics.nfw import cdm_velocity, abundance_matching, fit_halo, concentration, r200_kpc
+from physics.engine import GravisConfig, GravisEngine
 from data.galaxies import get_all_galaxies, get_galaxy_by_id
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -79,6 +80,7 @@ def compute_rotation_curve():
     accel_ratio = data.get("accel_ratio", 1.0)
     mass_model = data.get("mass_model")
     observations = data.get("observations")
+    galactic_radius = data.get("galactic_radius")
 
     if not mass_model:
         return jsonify({"error": "mass_model is required"}), 400
@@ -121,39 +123,29 @@ def compute_rotation_curve():
         }
 
     # ------------------------------------------------------------------
-    # Compute curves at each radius
+    # Compute curves via the GravisEngine pipeline
     # ------------------------------------------------------------------
-    radii = []
-    newtonian = []
-    dtg = []
-    mond = []
-    cdm = []
-    enc_mass = []
+    config = GravisConfig(
+        mass_model=mass_model,
+        max_radius=max_radius,
+        num_points=num_points,
+        accel_ratio=accel_ratio,
+        galactic_radius=galactic_radius,
+    )
+    engine = GravisEngine.rotation_curve(config, m200=m200)
+    result = engine.run()
 
-    for i in range(num_points):
-        r = (max_radius / num_points) * (i + 1)
-        m_at_r = enclosed_mass(r, mass_model)
+    # Build API response from the pipeline result.
+    # to_api_response() produces the identical flat dict format that
+    # the frontend expects: radii, newtonian, dtg, mond, cdm, enclosed_mass.
+    response = result.to_api_response()
 
-        radii.append(round(r, 6))
-        enc_mass.append(round(m_at_r, 2))
-        newtonian.append(round(newtonian_velocity(r, m_at_r), 4))
-        dtg.append(round(dtg_velocity(r, m_at_r, accel_ratio), 4))
-        mond.append(round(mond_velocity(r, m_at_r, accel_ratio), 4))
-        cdm.append(round(cdm_velocity(r, m_at_r, m200), 4))
-
-    # Format halo info for JSON
+    # Append CDM halo info (computed above, outside the engine)
     if cdm_halo_info:
         cdm_halo_info['m200'] = round(cdm_halo_info['m200'], 2)
+    response["cdm_halo"] = cdm_halo_info
 
-    return jsonify({
-        "radii": radii,
-        "newtonian": newtonian,
-        "dtg": dtg,
-        "mond": mond,
-        "cdm": cdm,
-        "enclosed_mass": enc_mass,
-        "cdm_halo": cdm_halo_info,
-    })
+    return jsonify(response)
 
 
 @api.route("/infer-mass", methods=["POST"])
@@ -182,7 +174,11 @@ def infer_mass_endpoint():
     v_km_s = data.get("v_km_s", 230.0)
     accel_ratio = data.get("accel_ratio", 1.0)
 
-    mass = infer_mass(r_kpc, v_km_s, accel_ratio)
+    # Use the engine for traceable single-point inference.
+    # The StageResult captures all intermediates (g_eff, x, g_N)
+    # for future verbose mode exposure.
+    result = GravisEngine.infer_mass(r_kpc, v_km_s, accel_ratio)
+    mass = result.series[0]
 
     return jsonify({
         "inferred_mass_solar": mass,

@@ -31,6 +31,15 @@ let pinnedGalaxyExample = null;  // full example ref for Data Sources card
 let isLoadingExample = false;
 let galaxyCatalog = { prediction: [], inference: [] };
 let lastCdmHalo = null;
+
+/**
+ * Get the galactic radius (gravitational horizon) from the slider.
+ * Returns null only when no galaxy is loaded and slider is at 0.
+ */
+function getGalacticRadius() {
+    var val = parseFloat(galacticRadiusSlider.value);
+    return (val && val > 0) ? val : null;
+}
 let lastMultiResult = null;     // cached multi-point inference result
 let lastModelTotal = 0;         // cached anchor model total mass
 let lastAccelRatio = 1.0;       // cached accel ratio for band recompute
@@ -49,6 +58,8 @@ const anchorRadiusInput = document.getElementById('anchor-radius');
 const massSlider = document.getElementById('mass-slider');
 const velocitySlider = document.getElementById('velocity-slider');
 const accelSlider = document.getElementById('accel-slider');
+const galacticRadiusSlider = document.getElementById('galactic-radius-slider');
+const galacticRadiusValue = document.getElementById('galactic-radius-value');
 const distanceValue = document.getElementById('distance-value');
 const massValue = document.getElementById('mass-value');
 const velocityValue = document.getElementById('velocity-value');
@@ -188,6 +199,13 @@ function updateMassModelDisplaysOnly() {
     });
 });
 
+// Galactic radius slider listener: updates the display and triggers
+// chart recompute so the GFD+ structural term responds in real time.
+galacticRadiusSlider.addEventListener('input', () => {
+    galacticRadiusValue.textContent = galacticRadiusSlider.value + ' kpc';
+    debouncedUpdateChart();
+});
+
 // =====================================================================
 // ERROR BAR PLUGIN
 // =====================================================================
@@ -219,6 +237,95 @@ const errorBarPlugin = {
     }
 };
 Chart.register(errorBarPlugin);
+
+// =====================================================================
+// FIELD ORIGIN BOUNDARY PLUGIN
+// =====================================================================
+// Draws a vertical dashed line at the throat radius R_t = 0.30 * R_env
+// to mark where the stellated field origin boundary ends.
+
+var fieldOriginBoundaryPlugin = {
+    id: 'fieldOriginBoundary',
+    afterDraw: function(chartInstance) {
+        var rEnv = getGalacticRadius();
+        if (!rEnv) return;
+        var rThroat = 0.30 * rEnv;
+
+        var xScale = chartInstance.scales.x;
+        var yAxis = chartInstance.scales.y;
+        if (!xScale || !yAxis) return;
+
+        // Only draw if R_t is within the visible x range
+        if (rThroat < xScale.min || rThroat > xScale.max) return;
+
+        var xPixel = xScale.getPixelForValue(rThroat);
+        var ctx = chartInstance.ctx;
+        ctx.save();
+
+        // Dashed vertical line
+        ctx.beginPath();
+        ctx.setLineDash([6, 4]);
+        ctx.moveTo(xPixel, yAxis.top);
+        ctx.lineTo(xPixel, yAxis.bottom);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(118, 255, 3, 0.45)';
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label at the top
+        ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(118, 255, 3, 0.7)';
+        ctx.textAlign = 'center';
+        ctx.fillText('Field Origin ' + rThroat.toFixed(1) + ' kpc', xPixel, yAxis.top - 6);
+
+        ctx.restore();
+    }
+};
+Chart.register(fieldOriginBoundaryPlugin);
+
+// =====================================================================
+// FIELD HORIZON PLUGIN
+// =====================================================================
+// Draws a vertical dashed line at R_env (the galactic radius / baryonic
+// horizon) in red to mark the full extent of the baryonic envelope.
+
+var fieldHorizonPlugin = {
+    id: 'fieldHorizon',
+    afterDraw: function(chartInstance) {
+        var rEnv = getGalacticRadius();
+        if (!rEnv) return;
+
+        var xScale = chartInstance.scales.x;
+        var yAxis = chartInstance.scales.y;
+        if (!xScale || !yAxis) return;
+
+        // Only draw if R_env is within the visible x range
+        if (rEnv < xScale.min || rEnv > xScale.max) return;
+
+        var xPixel = xScale.getPixelForValue(rEnv);
+        var ctx = chartInstance.ctx;
+        ctx.save();
+
+        // Dashed vertical line
+        ctx.beginPath();
+        ctx.setLineDash([6, 4]);
+        ctx.moveTo(xPixel, yAxis.top);
+        ctx.lineTo(xPixel, yAxis.bottom);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(255, 107, 107, 0.45)';
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label at the top
+        ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(255, 107, 107, 0.7)';
+        ctx.textAlign = 'center';
+        ctx.fillText('Field Horizon ' + rEnv.toFixed(1) + ' kpc', xPixel, yAxis.top - 6);
+
+        ctx.restore();
+    }
+};
+Chart.register(fieldHorizonPlugin);
 
 // =====================================================================
 // CHART INITIALIZATION
@@ -283,9 +390,13 @@ function buildInferenceTooltip(dp) {
         var errStr = (m.err && m.err > 0) ? ' \u00B1 ' + m.err : '';
         html += ttRow('<span style="color:#ffa726;">\u25CF</span> Observed', m.obs_v.toFixed(1) + errStr + ' km/s', '#ffa726');
     }
+    var gfdStructureV2 = interpolateCurve(8, r);
     var newtonV = interpolateCurve(0, r);
     var mondV = interpolateCurve(2, r);
     var cdmV = interpolateCurve(7, r);
+    if (gfdStructureV2 !== null && chart.data.datasets[8].data.length > 0) {
+        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD+', gfdStructureV2.toFixed(1) + ' km/s', '#76FF03');
+    }
     if (newtonV !== null) {
         html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s', '#ef5350');
     }
@@ -375,10 +486,14 @@ function buildObservedTooltip(dp) {
     html += ttRow('<span style="color:#ffa726;">\u25CF</span> Observed', vObs.toFixed(1) + errStr + ' km/s', '#ffa726');
 
     var gfdV = interpolateCurve(1, r);
+    var gfdStructureV = interpolateCurve(8, r);
     var newtonV = interpolateCurve(0, r);
     var mondV = interpolateCurve(2, r);
     var cdmV = interpolateCurve(7, r);
     if (gfdV !== null)    html += ttRow('<span style="color:#4da6ff;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s', '#4da6ff');
+    if (gfdStructureV !== null && chart.data.datasets[8].data.length > 0) {
+        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD+', gfdStructureV.toFixed(1) + ' km/s', '#76FF03');
+    }
     if (newtonV !== null) html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s', '#ef5350');
     if (mondV !== null)   html += ttRow('<span style="color:#ab47bc;">\u25CF</span> MOND', mondV.toFixed(1) + ' km/s', '#ab47bc');
     if (cdmV !== null && chart.data.datasets[7].data.length > 0) {
@@ -549,6 +664,25 @@ function externalTooltipHandler(tooltipContext) {
     el.style.opacity = '1';
 }
 
+// Vertical crosshair line plugin: draws a thin line at the mouse x position
+var crosshairLinePlugin = {
+    id: 'crosshairLine',
+    afterDraw: function(chartInstance) {
+        if (!chartInstance._crosshairX) return;
+        var ctx2 = chartInstance.ctx;
+        var yAxis = chartInstance.scales.y;
+        var x = chartInstance._crosshairX;
+        ctx2.save();
+        ctx2.beginPath();
+        ctx2.moveTo(x, yAxis.top);
+        ctx2.lineTo(x, yAxis.bottom);
+        ctx2.lineWidth = 1;
+        ctx2.strokeStyle = 'rgba(77, 166, 255, 0.3)';
+        ctx2.stroke();
+        ctx2.restore();
+    }
+};
+
 const ctx = document.getElementById('gravityChart').getContext('2d');
 const chart = new Chart(ctx, {
     type: 'line',
@@ -592,23 +726,23 @@ const chart = new Chart(ctx, {
                 pointStyle: 'line',
                 showLine: false
             },
-            // Dataset 4: GFD confidence band upper edge (hidden from legend)
+            // Dataset 4: GFD/GFD+ envelope upper edge (hidden from legend)
             {
-                label: 'GFD +1\u03C3',
+                label: 'GFD envelope upper',
                 data: [],
-                borderColor: 'rgba(76, 175, 80, 0.35)',
-                backgroundColor: 'rgba(76, 175, 80, 0.12)',
+                borderColor: 'rgba(118, 255, 3, 0.30)',
+                backgroundColor: 'rgba(118, 255, 3, 0.10)',
                 borderWidth: 1,
                 borderDash: [4, 4],
                 tension: 0.4,
                 pointRadius: 0,
-                fill: {target: 5, above: 'rgba(76, 175, 80, 0.12)', below: 'rgba(76, 175, 80, 0.12)'}
+                fill: {target: 5, above: 'rgba(118, 255, 3, 0.10)', below: 'rgba(118, 255, 3, 0.10)'}
             },
-            // Dataset 5: GFD confidence band lower edge (hidden from legend)
+            // Dataset 5: GFD/GFD+ envelope lower edge (hidden from legend)
             {
-                label: 'GFD -1\u03C3',
+                label: 'GFD envelope lower',
                 data: [],
-                borderColor: 'rgba(76, 175, 80, 0.35)',
+                borderColor: 'rgba(118, 255, 3, 0.30)',
                 backgroundColor: 'transparent',
                 borderWidth: 1,
                 borderDash: [4, 4],
@@ -637,37 +771,31 @@ const chart = new Chart(ctx, {
                 borderDash: [8, 4],
                 tension: 0.4,
                 pointRadius: 0
+            },
+            // Dataset 8: GFD+ (covariant + recursive structural release)
+            {
+                label: 'GFD+',
+                data: [],
+                borderColor: '#76FF03',
+                backgroundColor: 'rgba(118, 255, 3, 0.08)',
+                borderWidth: 2.5,
+                tension: 0.4,
+                pointRadius: 0
             }
         ]
     },
     options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: {
+            padding: { top: 16 }
+        },
         plugins: {
             legend: {
-                display: true,
-                position: 'top',
-                align: 'end',
-                labels: {
-                    color: '#e0e0e0',
-                    font: { size: 12 },
-                    padding: 15,
-                    usePointStyle: true,
-                    boxWidth: 40,
-                    boxHeight: 3,
-                    filter: function(item, chartData) {
-                        // Hide confidence band datasets from legend
-                        if (item.datasetIndex === 4 || item.datasetIndex === 5) return false;
-                        // Hide inference markers from legend when no data
-                        if (item.datasetIndex === 6) {
-                            var ds = chartData.datasets[6];
-                            return ds && ds.data && ds.data.length > 0;
-                        }
-                        return true;
-                    },
-                    // Custom styling for CDM dashed line in legend
-                    pointStyleWidth: 0
-                }
+                // Legend replaced by the theory toggle bar above the chart.
+                // We keep it hidden but retain the filter so internal
+                // Chart.js operations that reference legend items still work.
+                display: false
             },
             title: {
                 display: true,
@@ -680,6 +808,7 @@ const chart = new Chart(ctx, {
                 enabled: false,
                 external: externalTooltipHandler
             },
+            crosshairLine: {},
             zoom: {
                 pan: {
                     enabled: true,
@@ -735,6 +864,27 @@ const chart = new Chart(ctx, {
     }
 });
 
+// Register crosshair line plugin
+Chart.register(crosshairLinePlugin);
+
+// Track mouse position for the crosshair vertical line
+var gravityCanvas = document.getElementById('gravityChart');
+gravityCanvas.addEventListener('mousemove', function(e) {
+    var rect = gravityCanvas.getBoundingClientRect();
+    var pixelX = e.clientX - rect.left;
+    var xScale = chart.scales.x;
+    if (xScale && pixelX >= xScale.left && pixelX <= xScale.right) {
+        chart._crosshairX = pixelX;
+    } else {
+        chart._crosshairX = null;
+    }
+    chart.draw();
+});
+gravityCanvas.addEventListener('mouseleave', function() {
+    chart._crosshairX = null;
+    chart.draw();
+});
+
 // =====================================================================
 // ZOOM CONTROLS
 // =====================================================================
@@ -752,7 +902,7 @@ canvas.addEventListener('dblclick', resetChartZoom);
 // API COMMUNICATION
 // =====================================================================
 
-async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations) {
+async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations, galacticRadius) {
     var body = {
         max_radius: maxRadius,
         num_points: 100,
@@ -761,6 +911,11 @@ async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations
     };
     if (observations) {
         body.observations = observations;
+    }
+    // Galactic radius (gravitational horizon) for manifold computation.
+    // Falls back to max_radius on the backend if not provided.
+    if (galacticRadius) {
+        body.galactic_radius = galacticRadius;
     }
     const resp = await fetch('/api/rotation-curve', {
         method: 'POST',
@@ -920,31 +1075,8 @@ async function runMultiPointInference(accelRatio, massModel) {
         lastAccelRatio = accelRatio;
         lastMassModel = massModel;
 
-        // Green inference markers -- enriched meta for tooltips
-        var markerData = [];
-        for (var i = 0; i < result.points.length; i++) {
-            var pt = result.points[i];
-            var gfdV = interpolateGFDVelocity(pt.r_kpc);
-            if (gfdV === null) continue;
-            var deviation = ((pt.inferred_total - modelTotal) / modelTotal) * 100;
-            // Sigma calculation: how many error bars away is GFD from observation
-            var sigmaAway = (pt.err && pt.err > 0)
-                ? Math.abs(gfdV - pt.v_km_s) / pt.err
-                : null;
-            markerData.push({
-                x: pt.r_kpc, y: gfdV,
-                meta: {
-                    obs_v: pt.v_km_s, err: pt.err,
-                    inferred_total: pt.inferred_total,
-                    log10_total: pt.log10_total,
-                    enclosed_frac: pt.enclosed_frac,
-                    deviation: deviation,
-                    gfd_total: modelTotal,
-                    sigma_away: sigmaAway
-                }
-            });
-        }
-        chart.data.datasets[6].data = markerData;
+        // Clear inference markers (green diamonds removed for cleaner UI)
+        chart.data.datasets[6].data = [];
 
         // Render sidebar first so #band-width-display exists in the DOM
         // before updateBand() calls updateBandLabel()
@@ -1014,7 +1146,14 @@ function getBandMethodInfo(method) {
 }
 
 /**
- * Recompute and render the confidence band using the currently selected method.
+ * Recompute and render the confidence band.
+ *
+ * In inference mode the band is the envelope between the GFD (dataset 1)
+ * and GFD+ (dataset 8) curves already on the chart.  This gives a clean
+ * "theory range" without extra API calls or mass scaling.
+ *
+ * In prediction mode the band is still available via the legacy
+ * mass-scaling approach (unused for now, kept as fallback).
  */
 async function updateBand() {
     if (!lastMultiResult || !lastMassModel || lastModelTotal <= 0) {
@@ -1024,42 +1163,32 @@ async function updateBand() {
         return;
     }
 
-    var method = document.getElementById('band-method-select').value;
-    var halfWidth = getBandHalfWidth(method);
+    // --- Inference mode: envelope between GFD and GFD+ ---
+    var gfdData = chart.data.datasets[1].data;       // GFD
+    var gfdPlusData = chart.data.datasets[8].data;    // GFD+
 
-    if (halfWidth <= 0) {
+    if (gfdData.length > 0 && gfdPlusData.length > 0) {
+        // Both curves exist: band = max / min at each point
+        var upperData = [], lowerData = [];
+        var len = Math.min(gfdData.length, gfdPlusData.length);
+        for (var i = 0; i < len; i++) {
+            var yGfd = gfdData[i].y;
+            var yPlus = gfdPlusData[i].y;
+            var x = gfdData[i].x;
+            upperData.push({x: x, y: Math.max(yGfd, yPlus)});
+            lowerData.push({x: x, y: Math.min(yGfd, yPlus)});
+        }
+        chart.data.datasets[4].data = upperData;
+        chart.data.datasets[5].data = lowerData;
+    } else if (gfdData.length > 0) {
+        // GFD+ not available: no meaningful band to show
         chart.data.datasets[4].data = [];
         chart.data.datasets[5].data = [];
-        chart.update('none');
-        return;
+    } else {
+        chart.data.datasets[4].data = [];
+        chart.data.datasets[5].data = [];
     }
 
-    var scaleHigh = (lastModelTotal + halfWidth) / lastModelTotal;
-    var scaleLow = Math.max(0.01, (lastModelTotal - halfWidth) / lastModelTotal);
-    var modelHigh = scaleMassModel(lastMassModel, scaleHigh);
-    var modelLow = scaleMassModel(lastMassModel, scaleLow);
-
-    var chartMaxR = parseFloat(distanceSlider.value);
-    var observations = pinnedObservations || (currentExample ? getPredictionObservations(currentExample) : null);
-    if (observations && observations.length > 0) {
-        var maxObsR = Math.max.apply(null, observations.map(function(o) { return o.r; }));
-        chartMaxR = Math.max(chartMaxR, maxObsR * 1.15);
-    }
-
-    var bandResults = await Promise.all([
-        fetchRotationCurve(chartMaxR, lastAccelRatio, modelHigh),
-        fetchRotationCurve(chartMaxR, lastAccelRatio, modelLow)
-    ]);
-
-    var upperData = [], lowerData = [];
-    for (var i = 0; i < bandResults[0].radii.length; i++) {
-        upperData.push({x: bandResults[0].radii[i], y: bandResults[0].dtg[i]});
-    }
-    for (var i = 0; i < bandResults[1].radii.length; i++) {
-        lowerData.push({x: bandResults[1].radii[i], y: bandResults[1].dtg[i]});
-    }
-    chart.data.datasets[4].data = upperData;
-    chart.data.datasets[5].data = lowerData;
     chart.update('none');
 
     // Update the band label in the sidebar
@@ -1072,15 +1201,10 @@ async function updateBand() {
 function updateBandLabel() {
     var el = document.getElementById('band-width-display');
     if (!el || lastModelTotal <= 0) return;
-    var method = document.getElementById('band-method-select').value;
-    var halfWidth = getBandHalfWidth(method);
-    var info = getBandMethodInfo(method);
-    var anchorExp = Math.floor(Math.log10(lastModelTotal));
-    var hwCoeff = halfWidth / Math.pow(10, anchorExp);
-    el.innerHTML = '<strong style="color:#e0e0e0;">Band (' + info.label + '):</strong> '
-        + '<span style="color:#4caf50;">\u00B1 ' + hwCoeff.toFixed(2)
-        + ' \u00D7 10' + superscript(anchorExp) + ' M\u2609</span>'
-        + '<div style="font-size:0.8em; color:#606060; margin-top:2px;">' + info.desc + '</div>';
+    el.innerHTML = '<strong style="color:#e0e0e0;">Band:</strong> '
+        + '<span style="color:#76FF03;">GFD / GFD+ envelope</span>'
+        + '<div style="font-size:0.8em; color:#606060; margin-top:2px;">'
+        + 'Shaded region between base GFD and GFD+ (structural) predictions</div>';
 }
 
 /**
@@ -1105,7 +1229,7 @@ function renderMultiPointSidebar(result, modelTotal) {
 
     html += '<div style="margin-bottom: 10px; line-height: 1.5;">';
     html += 'Mass inferred at <strong style="color:#e0e0e0;">' + result.n_points + '</strong> radii. ';
-    html += '<span style="color:#4caf50;">Diamonds</span> = GFD velocity; hover for details.';
+    html += '<span style="color:#76FF03;">Band</span> = GFD / GFD+ envelope.';
     html += '</div>';
 
     html += '<div style="margin-bottom: 6px;">';
@@ -1406,7 +1530,7 @@ async function updateChart() {
                 chartMaxR = Math.max(chartMaxR, maxObsR * 1.15);
             }
 
-            const data = await fetchRotationCurve(chartMaxR, accelRatio, curveModel, predObs);
+            const data = await fetchRotationCurve(chartMaxR, accelRatio, curveModel, predObs, getGalacticRadius());
             renderCurves(data);
 
             // Show observation points -- use pinned observations if user is fine-tuning
@@ -1446,7 +1570,7 @@ async function updateChart() {
                 var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
                 predMaxR = Math.max(predMaxR, maxObsR * 1.15);
             }
-            const data = await fetchRotationCurve(predMaxR, accelRatio, massModel, predObs);
+            const data = await fetchRotationCurve(predMaxR, accelRatio, massModel, predObs, getGalacticRadius());
             renderCurves(data);
 
             // Handle observed data -- show pinned observations even when sliders are adjusted
@@ -1475,6 +1599,7 @@ function renderCurves(data) {
     const dtgData = [];
     const mondData = [];
     const cdmData = [];
+    const gfdStructureData = [];
 
     for (let i = 0; i < data.radii.length; i++) {
         newtonianData.push({x: data.radii[i], y: data.newtonian[i]});
@@ -1483,6 +1608,9 @@ function renderCurves(data) {
         if (data.cdm) {
             cdmData.push({x: data.radii[i], y: data.cdm[i]});
         }
+        if (data.gfd_structure) {
+            gfdStructureData.push({x: data.radii[i], y: data.gfd_structure[i]});
+        }
     }
 
     chart.data.labels = [];
@@ -1490,6 +1618,7 @@ function renderCurves(data) {
     chart.data.datasets[1].data = dtgData;
     chart.data.datasets[2].data = mondData;
     chart.data.datasets[7].data = cdmData;
+    chart.data.datasets[8].data = gfdStructureData;
 
     // Store CDM halo info for display
     lastCdmHalo = data.cdm_halo || null;
@@ -1550,6 +1679,7 @@ function updateDisplays() {
 
     velocityValue.textContent = velocity + ' km/s';
     accelValue.textContent = 'a/a\u2080 = ' + accelRatio.toFixed(2);
+    galacticRadiusValue.textContent = galacticRadiusSlider.value + ' kpc';
 }
 
 // =====================================================================
@@ -1679,6 +1809,12 @@ function loadExample() {
     }
     updateMassModelDisplays();
 
+    // Sync galactic radius slider
+    if (example.galactic_radius) {
+        galacticRadiusSlider.value = example.galactic_radius;
+        galacticRadiusValue.textContent = example.galactic_radius + ' kpc';
+    }
+
     updateDisplays();
     updateChart().then(() => {
         chart.resetZoom();
@@ -1720,6 +1856,8 @@ function setMode(mode) {
         clearInferenceChart();
         // In prediction mode, mass sliders are directly editable
         setMassSliderEditable(true);
+        // Unlock any locked chips from inference mode
+        unlockAllChips();
         // Update header text
         document.querySelector('.mass-model-header-text').textContent = 'Mass Distribution';
     } else {
@@ -1733,6 +1871,10 @@ function setMode(mode) {
         setMassSliderEditable(false);
         // Update header to indicate shape mode
         document.querySelector('.mass-model-header-text').textContent = 'Mass Distribution Shape (masses auto-inferred)';
+
+        // Force GFD and GFD+ chips on and lock them (required for inference)
+        forceChipOn('gfd');
+        forceChipOn('gfd_structure');
     }
 
     updateExamplesDropdown();
@@ -1890,18 +2032,253 @@ document.addEventListener('mouseup', () => {
 });
 
 // =====================================================================
-// NAVIGATION SYSTEM
+// THEORY TOGGLE BAR
 // =====================================================================
+//
+// Maps each toggle chip's data-series attribute to the Chart.js dataset
+// indices it controls. Toggling a chip shows or hides those datasets.
 
-// FAQ has been extracted to static/js/faq.js (standalone page)
+var theoryDatasetMap = {
+    'observed':      [3],       // Observed Data points
+    'newtonian':     [0],       // Newtonian Gravity
+    'gfd':           [1, 4, 5], // GFD curve + confidence band upper/lower
+    'gfd_structure': [8],       // GFD+
+    'mond':          [2],       // Classical MOND
+    'cdm':           [7]        // CDM + NFW
+};
 
+/**
+ * Force a theory chip on by data-series key.
+ * Ensures the checkbox is checked, the chip has the active class,
+ * the corresponding datasets are visible, and adds a "locked" CSS
+ * class so the user can see the chip is non-toggleable.
+ */
+function forceChipOn(seriesKey) {
+    var chip = document.querySelector('.theory-chip[data-series="' + seriesKey + '"]');
+    if (!chip) return;
+    var cb = chip.querySelector('input[type="checkbox"]');
+    if (cb) cb.checked = true;
+    chip.classList.add('active');
+    chip.classList.add('locked');
+    var indices = theoryDatasetMap[seriesKey] || [];
+    for (var j = 0; j < indices.length; j++) {
+        chart.data.datasets[indices[j]].hidden = false;
+    }
+}
 
+/**
+ * Remove the "locked" CSS class from all theory chips.
+ * Called when leaving inference mode so chips become toggleable again.
+ */
+function unlockAllChips() {
+    var chips = document.querySelectorAll('.theory-chip.locked');
+    for (var i = 0; i < chips.length; i++) {
+        chips[i].classList.remove('locked');
+    }
+}
+
+/**
+ * Initialize theory toggle chips: sync checked state with active class,
+ * attach click handlers to toggle chart dataset visibility.
+ */
+function initTheoryToggles() {
+    var chips = document.querySelectorAll('.theory-chip');
+    for (var i = 0; i < chips.length; i++) {
+        var chip = chips[i];
+        var checkbox = chip.querySelector('input[type="checkbox"]');
+
+        // Set initial active class from checkbox state
+        if (checkbox && checkbox.checked) {
+            chip.classList.add('active');
+        }
+
+        // Click handler: toggle dataset visibility.
+        // preventDefault() stops the <label> from toggling the checkbox
+        // on its own, so we control the state exactly once per click.
+        chip.addEventListener('click', function(e) {
+            e.preventDefault();
+            var seriesKey = this.getAttribute('data-series');
+
+            // In inference mode, GFD and GFD+ are locked on (required
+            // for inference computation). Skip toggle for these chips.
+            if (currentMode === 'inference' &&
+                (seriesKey === 'gfd' || seriesKey === 'gfd_structure')) {
+                return;
+            }
+
+            var cb = this.querySelector('input[type="checkbox"]');
+            cb.checked = !cb.checked;
+
+            var indices = theoryDatasetMap[seriesKey] || [];
+            var hidden = !cb.checked;
+
+            // Apply active class for styling
+            if (cb.checked) {
+                this.classList.add('active');
+            } else {
+                this.classList.remove('active');
+            }
+
+            // Show or hide each mapped dataset
+            for (var j = 0; j < indices.length; j++) {
+                chart.data.datasets[indices[j]].hidden = hidden;
+            }
+            chart.update('none');
+        });
+    }
+}
+
+// =====================================================================
+// CROSSHAIR READOUT
+// =====================================================================
+//
+// Shows a floating panel near the cursor with interpolated values from
+// each visible theory curve at the current x (radius) position.
+
+var crosshairReadout = null;
+
+/**
+ * Create the crosshair readout DOM element and append to chart container.
+ */
+function initCrosshairReadout() {
+    var container = document.querySelector('.chart-container');
+    if (!container) return;
+
+    crosshairReadout = document.createElement('div');
+    crosshairReadout.className = 'crosshair-readout';
+    container.appendChild(crosshairReadout);
+
+    // Track mouse movement over the canvas
+    var canvasEl = document.getElementById('gravityChart');
+    if (!canvasEl) return;
+
+    canvasEl.addEventListener('mousemove', function(e) {
+        if (!crosshairReadout) return;
+
+        // Get the x-axis scale to convert pixel to data coordinates
+        var xScale = chart.scales.x;
+        var yScale = chart.scales.y;
+        if (!xScale || !yScale) return;
+
+        // Convert mouse x to chart area pixel offset
+        var rect = canvasEl.getBoundingClientRect();
+        var pixelX = e.clientX - rect.left;
+
+        // Only show readout when mouse is within the plot area
+        if (pixelX < xScale.left || pixelX > xScale.right) {
+            crosshairReadout.classList.remove('visible');
+            return;
+        }
+
+        var radius = xScale.getValueForPixel(pixelX);
+        if (radius < 0) {
+            crosshairReadout.classList.remove('visible');
+            return;
+        }
+
+        // Build readout content with one row per visible series
+        var html = '<div style="margin-bottom:4px;color:#4da6ff;font-weight:600;">r = ' +
+                   radius.toFixed(1) + ' kpc</div>';
+
+        // Series definitions: name, dataset index, color, label
+        var seriesDefs = [
+            {key: 'observed',      idx: 3, color: '#FFC107', label: 'Observed'},
+            {key: 'newtonian',     idx: 0, color: '#ff6b6b', label: 'Newtonian'},
+            {key: 'gfd',           idx: 1, color: '#4da6ff', label: 'GFD'},
+            {key: 'gfd_structure', idx: 8, color: '#76FF03', label: 'GFD+'},
+            {key: 'mond',          idx: 2, color: '#9966ff', label: 'MOND'},
+            {key: 'cdm',           idx: 7, color: '#ffffff', label: 'CDM'}
+        ];
+
+        var hasValues = false;
+        for (var i = 0; i < seriesDefs.length; i++) {
+            var def = seriesDefs[i];
+            var ds = chart.data.datasets[def.idx];
+            if (!ds || ds.hidden || !ds.data || ds.data.length === 0) continue;
+
+            // For observed data, find nearest point instead of interpolating
+            var val = null;
+            if (def.key === 'observed') {
+                var nearest = null;
+                var nearestDist = Infinity;
+                for (var p = 0; p < ds.data.length; p++) {
+                    var dist = Math.abs(ds.data[p].x - radius);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearest = ds.data[p];
+                    }
+                }
+                // Only show if within 1 kpc of a data point
+                if (nearest && nearestDist < 1.0) {
+                    var errStr = nearest.err ? ' +/- ' + nearest.err.toFixed(1) : '';
+                    html += '<div class="crosshair-readout-row">' +
+                            '<span class="crosshair-dot" style="background:' + def.color + '"></span>' +
+                            '<span class="crosshair-label">' + def.label + '</span>' +
+                            '<span class="crosshair-value">' + nearest.y.toFixed(1) + errStr + ' km/s</span>' +
+                            '</div>';
+                    hasValues = true;
+                }
+                continue;
+            }
+
+            // For theory curves, interpolate
+            val = interpolateCurve(def.idx, radius);
+            if (val !== null) {
+                html += '<div class="crosshair-readout-row">' +
+                        '<span class="crosshair-dot" style="background:' + def.color + '"></span>' +
+                        '<span class="crosshair-label">' + def.label + '</span>' +
+                        '<span class="crosshair-value">' + val.toFixed(1) + ' km/s</span>' +
+                        '</div>';
+                hasValues = true;
+            }
+        }
+
+        if (!hasValues) {
+            crosshairReadout.classList.remove('visible');
+            return;
+        }
+
+        crosshairReadout.innerHTML = html;
+        crosshairReadout.classList.add('visible');
+
+        // Position readout near cursor, offset to the right.
+        // Use chart container as reference for absolute positioning.
+        var containerRect = container.getBoundingClientRect();
+        var readoutLeft = e.clientX - containerRect.left + 16;
+        var readoutTop = e.clientY - containerRect.top - 20;
+
+        // Clamp so it doesn't overflow the container
+        var readoutWidth = crosshairReadout.offsetWidth || 200;
+        var readoutHeight = crosshairReadout.offsetHeight || 100;
+        if (readoutLeft + readoutWidth > containerRect.width - 10) {
+            readoutLeft = e.clientX - containerRect.left - readoutWidth - 16;
+        }
+        if (readoutTop + readoutHeight > containerRect.height - 10) {
+            readoutTop = containerRect.height - readoutHeight - 10;
+        }
+        if (readoutTop < 10) readoutTop = 10;
+
+        crosshairReadout.style.left = readoutLeft + 'px';
+        crosshairReadout.style.top = readoutTop + 'px';
+    });
+
+    // Hide readout when mouse leaves the canvas
+    canvasEl.addEventListener('mouseleave', function() {
+        if (crosshairReadout) {
+            crosshairReadout.classList.remove('visible');
+        }
+    });
+}
 
 // =====================================================================
 // INITIALIZATION
 // =====================================================================
 
 async function init() {
+    // Initialize UI components before data loads
+    initTheoryToggles();
+    initCrosshairReadout();
+
     try {
         galaxyCatalog = await fetchGalaxies();
     } catch (err) {
@@ -1912,7 +2289,7 @@ async function init() {
 
     updateExamplesDropdown();
 
-    // Auto-load Milky Way
+    // Auto-load Milky Way so the chart is never empty on first visit
     const dropdown = document.getElementById('examples-dropdown');
     if (dropdown.options.length > 1) {
         dropdown.value = '1';

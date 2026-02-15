@@ -753,10 +753,234 @@ body {
     font-weight: 500;
 }
 
+/* =====================================================================
+   Command Bar: top-level controls (mode, galaxy, distance)
+   ===================================================================== */
+
+.command-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 20px;
+    background-color: #1e1e1e;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+    gap: 16px;
+}
+
+.command-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.command-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.command-mode-toggle {
+    display: flex;
+    gap: 6px;
+}
+
+.command-mode-toggle .mode-button {
+    padding: 6px 14px;
+    font-size: 0.82em;
+}
+
+.command-separator {
+    width: 1px;
+    height: 28px;
+    background: #404040;
+    flex-shrink: 0;
+}
+
+.command-galaxy {
+    display: flex;
+    align-items: center;
+}
+
+.command-dropdown {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.85em;
+    cursor: pointer;
+    min-width: 240px;
+    outline: none;
+}
+
+.command-dropdown:hover {
+    border-color: #4da6ff;
+}
+
+.command-dropdown:focus {
+    border-color: #4da6ff;
+    box-shadow: 0 0 0 2px rgba(77, 166, 255, 0.15);
+}
+
+.command-distance {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.command-label {
+    color: #808080;
+    font-size: 0.82em;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.command-slider {
+    width: 120px;
+    height: 4px;
+}
+
+.command-value {
+    color: #4da6ff;
+    font-size: 0.82em;
+    font-family: 'Consolas', 'Monaco', monospace;
+    min-width: 60px;
+    text-align: right;
+}
+
+/* =====================================================================
+   Analysis body: sidebar + chart below the command bar
+   ===================================================================== */
+
+.analysis-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* =====================================================================
+   Theory Toggle Bar
+   ===================================================================== */
+
+.theory-toggles {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.theory-toggles-label {
+    color: #808080;
+    font-size: 0.78em;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+}
+
+.theory-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 14px;
+    border: 1px solid var(--chip-color, #808080);
+    background: transparent;
+    color: var(--chip-color, #808080);
+    font-size: 0.78em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+    user-select: none;
+}
+
+/* Hide the native checkbox; the chip itself is the toggle */
+.theory-chip input[type="checkbox"] {
+    display: none;
+}
+
+/* Active (checked) state: filled background */
+.theory-chip.active {
+    background: color-mix(in srgb, var(--chip-color, #808080) 20%, transparent);
+}
+
+/* Inactive (unchecked) state: dimmed */
+.theory-chip:not(.active) {
+    opacity: 0.4;
+    border-style: dashed;
+}
+
+.theory-chip:hover {
+    opacity: 1;
+    background: color-mix(in srgb, var(--chip-color, #808080) 10%, transparent);
+}
+
+/* Locked chips in inference mode: always on, not toggleable */
+.theory-chip.locked {
+    cursor: default;
+    opacity: 1 !important;
+    border-style: solid !important;
+}
+
+/* =====================================================================
+   Crosshair readout: floating panel that follows mouse over chart
+   ===================================================================== */
+
+.crosshair-readout {
+    position: absolute;
+    pointer-events: none;
+    z-index: 20;
+    background: rgba(26, 26, 26, 0.92);
+    border: 1px solid #404040;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.78em;
+    line-height: 1.5;
+    color: #e0e0e0;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.1s;
+}
+
+.crosshair-readout.visible {
+    opacity: 1;
+}
+
+.crosshair-readout-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.crosshair-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.crosshair-label {
+    color: #808080;
+    min-width: 80px;
+}
+
+.crosshair-value {
+    font-family: 'Consolas', 'Monaco', monospace;
+    color: #e0e0e0;
+}
+
+/* =====================================================================
+   Left Panel (parameter workbench)
+   ===================================================================== */
+
 .left-panel {
-    width: 450px;
+    width: 380px;
     background-color: #242424;
-    padding: 30px;
+    padding: 20px;
     border-right: none;
     overflow-y: auto;
     flex-shrink: 0;
@@ -789,7 +1013,7 @@ body {
 
 .resize-handle {
     width: 4px;
-    height: 100vh;
+    height: 100%;
     background: #404040;
     cursor: col-resize;
     z-index: 10;
@@ -807,7 +1031,7 @@ body {
 
 .right-panel {
     flex: 1;
-    padding: 30px;
+    padding: 20px;
     display: flex;
     flex-direction: column;
 }
@@ -835,6 +1059,7 @@ h2 {
     font-style: italic;
 }
 
+/* Mode toggle wrapper (used in command bar now) */
 .mode-toggle {
     margin-bottom: 15px;
     padding: 15px;
@@ -946,16 +1171,16 @@ h2 {
 }
 
 .control-group {
-    margin-bottom: 20px;
+    margin-bottom: 14px;
 }
 
 .control-label {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
     color: #b0b0b0;
-    font-size: 0.95em;
+    font-size: 0.9em;
 }
 
 .control-label span:first-child {
@@ -1099,7 +1324,7 @@ input[type="range"]::-moz-range-thumb:hover {
 
 /* Mass Distribution Panel */
 .mass-model-section {
-    margin-bottom: 20px;
+    margin-bottom: 14px;
     background-color: #2a2a2a;
     border-radius: 8px;
     border: 1px solid #404040;
@@ -1176,6 +1401,11 @@ input[type="range"]::-moz-range-thumb:hover {
 
 .mass-model-total-row .control-value {
     font-size: 0.95em;
+}
+
+/* Galactic radius slider: lime green accent to associate with GFD+ */
+#galactic-radius-group .control-value {
+    color: #76FF03;
 }
 
 /* Inference mode: mass sliders heavily dimmed (auto-computed output, not input) */
