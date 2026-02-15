@@ -8,7 +8,15 @@ Supplemental tool for: Nelson, S. (2026). *Dual Tetrad Topology and the Field Or
 
 ![GRAVIS Application Screenshot](images/gravis-app.png)
 
-Given only the independently measured baryonic mass distribution of a galaxy (stellar bulge, stellar disk, gas disk), GRAVIS computes the full rotation curve with no dark matter and no free parameters. The characteristic acceleration scale $a_0$ is derived from first principles:
+### The Covariant Completion
+
+Given only the independently measured baryonic mass distribution of a galaxy, GRAVIS computes the full rotation curve with no dark matter and no free parameters. The core equation is the DTG covariant completion:
+
+$$g(r) = \frac{1}{2}\left[g_N + \sqrt{g_N^2 + 4\,g_N\,a_0}\right]$$
+
+where $g_N = GM(<r)/r^2$ is the Newtonian gravitational acceleration from baryons alone. This closed-form solution arises from the constitutive law $\mu(x) = x/(1+x)$, derived from topological closure of the dual tetrahedral metric. In the deep-MOND limit ($g_N \ll a_0$), it reduces to $g \approx \sqrt{g_N \, a_0}$; in the Newtonian limit ($g_N \gg a_0$), it recovers $g \approx g_N$.
+
+The characteristic acceleration scale $a_0$ is derived from first principles:
 
 $$a_0 = k^2 \, \frac{G \, m_e}{r_e^2} \approx 1.22 \times 10^{-10} \; \text{m/s}^2$$
 
@@ -27,6 +35,19 @@ where $k = 4$ is the simplex number for $d = 3$, $m_e$ is the electron mass, and
 All five theories are rendered simultaneously on the same chart alongside published observational data with error bars, enabling direct visual comparison.
 
 **Inverse inference (v -> M):** Given an observed circular velocity at a radius, infer the enclosed baryonic mass required by DTG. Multi-point consistency analysis propagates errors and computes deviation statistics across all observed radii.
+
+## Interactive Exploration
+
+GRAVIS is not just a static plotter. Every parameter is a live slider. Load any of the 10 pre-configured galaxies as a starting point, then adjust the mass distribution, scale lengths, galactic radius, and acceleration ratio in real time. All five theory curves update instantly.
+
+**For researchers:** Test sensitivity to baryonic assumptions. What happens to the GFD prediction if the disk mass is 20% higher? If the gas scale length doubles? Toggle individual theories on and off to isolate their behavior.
+
+**For educators and students:** The interactive sliders make this a powerful teaching tool:
+
+- **Visual intuition** -- Watch how extending the gas disk's scale length lifts the outer rotation curve, or how increasing bulge mass steepens the inner rise. These relationships are hard to convey on paper but become immediate when you can drag a slider and see the response.
+- **The mass discrepancy** -- Load any galaxy and compare the red Newtonian curve (baryons only, drops off) to the blue GFD curve (flat or rising). The gap between them is exactly what dark matter is invoked to explain.
+- **Theory comparison** -- See where GFD, MOND, and CDM agree, where they diverge, and how each responds to the same baryonic input. No other tool shows all three side by side on real data.
+- **From dwarfs to giants** -- Step through galaxies spanning 5 decades in mass: from DDO 154 (93% gas, 430 million solar masses) to UGC 2885 (250 billion solar masses). The same equation, with no parameter adjustments, handles them all.
 
 ## Quick Start
 
