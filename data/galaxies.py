@@ -42,10 +42,10 @@ PREDICTION_GALAXIES = [
     # === MAJOR SPIRALS ===
     {
         "id": "milky_way",
-        "name": "Milky Way (M = 8.0x10^10 M_sun, 19% gas)",
-        "distance": 30,
-        "galactic_radius": 30,
-        "mass": 10.903,
+        "name": "Milky Way (M = 7.6x10^10 M_sun, 20% gas)",
+        "distance": 65,
+        "galactic_radius": 60,
+        "mass": 10.879,
         "accel": 1.0,
         "mass_model": {
             # Bulge/bar: 1.2-2.0e10 (Portail+2017 dynamical model of bar,
@@ -53,13 +53,15 @@ PREDICTION_GALAXIES = [
             # a = 0.6 kpc from bar half-length ~5 kpc projected.
             "bulge": {"M": 1.5e10, "a": 0.6},
             # Thin + thick disk combined: McMillan 2017 total stellar = 54.3e9,
-            # minus bulge = ~40-45e9. Licquia & Newman 2016: disk = 4.8e10,
-            # Rd = 2.64 kpc. Published range 3.5-6.5e10. Using 5.0e10
-            # (slightly better fit than 4.5e10 per diagnostic comparison).
-            "disk":  {"M": 5.0e10, "Rd": 2.5},
+            # minus bulge 0.91e9 -> disk ~4.52e10. Bovy & Rix 2013:
+            # mass-weighted Rd = 2.15 +/- 0.14 kpc (SEGUE G dwarfs).
+            # Licquia & Newman 2015: disk = 5.17 +/- 1.11e10.
+            # Published range 3.5-5.5e10. Using 4.57e10 (McMillan 2017).
+            "disk":  {"M": 4.57e10, "Rd": 2.2},
             # HI: 7.1e9 (Nakanishi & Sofue), H2: 0.9e9 (Dame+2001),
             # He correction: x1.33, warm/hot CGM: 5-10e9 (Bregman+2018).
-            # Total ~1.0-2.0e10. HI extends to ~30 kpc, Rd_gas = 7.0 kpc.
+            # Total ~1.0-2.0e10. HI extends to ~60 kpc (Kalberla+2008),
+            # Rd_gas = 7.0 kpc.
             "gas":   {"M": 1.5e10, "Rd": 7.0},
         },
         "observations": [
@@ -87,6 +89,15 @@ PREDICTION_GALAXIES = [
             {"r": 22.3, "v": 197, "err": 6},
             {"r": 23.4, "v": 192, "err": 5},
             {"r": 25.0, "v": 191, "err": 8},
+            # Huang+2016 MNRAS 463 2623: Halo K giants (SDSS/SEGUE),
+            # Jeans equation with beta constraints. Different tracer
+            # population from disk RGB stars; errors are much larger.
+            # Values read from their Figure 12 combined RC.
+            {"r": 30,  "v": 206, "err": 30},
+            {"r": 40,  "v": 192, "err": 35},
+            # Ablimit & Zhao 2017 ApJ 846: RR Lyrae halo tracers,
+            # enclosed mass -> circular velocity at 50 kpc.
+            {"r": 50,  "v": 180, "err": 32},
         ],
         "references": [
             "Bland-Hawthorn & Gerhard 2016 ARAA 54 529 (bulge/bar review)",
@@ -98,18 +109,20 @@ PREDICTION_GALAXIES = [
             "Ou+2023 MNRAS (Gaia DR3 + APOGEE DR17, Table 1)",
             "Eilers+2019 ApJ 871 120 (rotation curve 5-25 kpc)",
             "Jiao+2023 A&A 678 A208 (Gaia DR3, Keplerian decline)",
+            "Huang+2016 MNRAS 463 2623 (HKG rotation curve to 100 kpc)",
+            "Ablimit & Zhao 2017 ApJ 846 (RR Lyrae halo, v_c at 50 kpc)",
         ],
     },
     {
         "id": "m31",
-        "name": "Andromeda M31 (M = 1.1x10^11 M_sun, 9% gas)",
+        "name": "Andromeda M31 (M = 1.18x10^11 M_sun, 8% gas)",
         "distance": 40,
         "galactic_radius": 40,
-        "mass": 11.04,
+        "mass": 11.07,
         "accel": 1.0,
         "mass_model": {
             "bulge": {"M": 3.0e10, "a": 1.0},
-            "disk":  {"M": 7.0e10, "Rd": 5.5},
+            "disk":  {"M": 7.76e10, "Rd": 5.5},
             "gas":   {"M": 1.0e10, "Rd": 12.0},
         },
         "observations": [
@@ -334,7 +347,7 @@ PREDICTION_GALAXIES = [
         "id": "ngc6503",
         "name": "NGC 6503 (M = 8.7x10^9 M_sun, 27% gas)",
         "distance": 18,
-        "galactic_radius": 25,
+        "galactic_radius": 17,
         "mass": 9.942,
         "accel": 1.0,
         "mass_model": {
@@ -364,7 +377,7 @@ PREDICTION_GALAXIES = [
         "id": "ugc2885",
         "name": "UGC 2885 Rubin's Galaxy (M = 2.5x10^11 M_sun, 40% gas)",
         "distance": 80,
-        "galactic_radius": 120,
+        "galactic_radius": 75,
         "mass": 11.40,
         "accel": 1.0,
         "mass_model": {
@@ -405,7 +418,7 @@ PREDICTION_GALAXIES = [
         "id": "m33",
         "name": "M33 Triangulum (M = 7.1x10^9 M_sun, 45% gas)",
         "distance": 20,
-        "galactic_radius": 16,
+        "galactic_radius": 17,
         "mass": 9.851,
         "accel": 1.0,
         "mass_model": {
@@ -449,27 +462,27 @@ INFERENCE_GALAXIES = [
     # inference engine will scale them to match the observed velocity.
     {
         "id": "mw_inference",
-        "name": "Milky Way (v = 230 km/s at 8 kpc, 13% gas)",
+        "name": "Milky Way (v = 230 km/s at 8 kpc, 20% gas)",
         "distance": 8,
         "velocity": 230,
         "accel": 1.0,
-        "galactic_radius": 30,
+        "galactic_radius": 60,
         "mass_model": {
             "bulge": {"M": 1.5e10, "a": 0.6},
-            "disk":  {"M": 5.0e10, "Rd": 2.5},
-            "gas":   {"M": 1.0e10, "Rd": 5.0},
+            "disk":  {"M": 4.57e10, "Rd": 2.2},
+            "gas":   {"M": 1.5e10, "Rd": 7.0},
         },
     },
     {
         "id": "m31_inference",
-        "name": "Andromeda M31 (v = 260 km/s at 15 kpc, 9% gas)",
+        "name": "Andromeda M31 (v = 260 km/s at 15 kpc, 8% gas)",
         "distance": 15,
         "velocity": 260,
         "accel": 1.0,
         "galactic_radius": 40,
         "mass_model": {
             "bulge": {"M": 3.0e10, "a": 1.0},
-            "disk":  {"M": 7.0e10, "Rd": 5.5},
+            "disk":  {"M": 7.76e10, "Rd": 5.5},
             "gas":   {"M": 1.0e10, "Rd": 12.0},
         },
     },
@@ -479,7 +492,7 @@ INFERENCE_GALAXIES = [
         "distance": 50,
         "velocity": 298,
         "accel": 1.0,
-        "galactic_radius": 120,
+        "galactic_radius": 75,
         "mass_model": {
             "bulge": {"M": 5.0e10, "a": 1.5},
             "disk":  {"M": 1.0e11, "Rd": 6.0},
@@ -505,7 +518,7 @@ INFERENCE_GALAXIES = [
         "distance": 10,
         "velocity": 121,
         "accel": 1.0,
-        "galactic_radius": 25,
+        "galactic_radius": 17,
         "mass_model": {
             "bulge": {"M": 0.6e9,  "a": 0.3},
             "disk":  {"M": 5.82e9, "Rd": 1.7},
@@ -527,28 +540,28 @@ INFERENCE_GALAXIES = [
     },
     {
         "id": "m33_inference",
-        "name": "M33 Triangulum (v = 112 km/s at 8 kpc, 47% gas)",
+        "name": "M33 Triangulum (v = 112 km/s at 8 kpc, 45% gas)",
         "distance": 8,
         "velocity": 112,
         "accel": 1.0,
-        "galactic_radius": 16,
+        "galactic_radius": 17,
         "mass_model": {
-            "bulge": {"M": 0.1e9, "a": 0.2},
-            "disk":  {"M": 2.0e9, "Rd": 1.4},
-            "gas":   {"M": 1.86e9, "Rd": 7.0},
+            "bulge": {"M": 0.4e9, "a": 0.18},
+            "disk":  {"M": 3.5e9, "Rd": 1.6},
+            "gas":   {"M": 3.2e9, "Rd": 4.0},
         },
     },
     {
         "id": "ddo154_inference",
-        "name": "DDO 154 (v = 44 km/s at 5 kpc, 96% gas)",
+        "name": "DDO 154 (v = 44 km/s at 5 kpc, 93% gas)",
         "distance": 5,
         "velocity": 44,
         "accel": 1.0,
         "galactic_radius": 8,
         "mass_model": {
             "bulge": {"M": 0, "a": 0.1},
-            "disk":  {"M": 1.95e7, "Rd": 0.40},
-            "gas":   {"M": 4.83e8, "Rd": 2.0},
+            "disk":  {"M": 3.0e7, "Rd": 0.7},
+            "gas":   {"M": 4.0e8, "Rd": 2.5},
         },
     },
     {

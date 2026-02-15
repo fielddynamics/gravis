@@ -530,16 +530,24 @@ class GravisEngine:
         if config.galactic_radius_explicit:
             mm = config.mass_model
             m_stellar = 0.0
+            m_total = 0.0
             if mm.get("bulge") and mm["bulge"].get("M"):
                 m_stellar += mm["bulge"]["M"]
+                m_total += mm["bulge"]["M"]
             if mm.get("disk") and mm["disk"].get("M"):
                 m_stellar += mm["disk"]["M"]
+                m_total += mm["disk"]["M"]
+            m_gas = 0.0
+            if mm.get("gas") and mm["gas"].get("M"):
+                m_gas = mm["gas"]["M"]
+                m_total += m_gas
+            f_gas = m_gas / m_total if m_total > 0 else 0.0
 
             engine.add_stage(GravisStage(
                 name="gfd_structure",
                 equation=gfd_structure_eq,
                 equation_label=(
-                    "g = g_DTG + (4/13)*G*M_star/R_t^2 "
+                    "g = g_DTG + f_gas*(4/13)*G*M_star/R_t^2 "
                     "* [(r-R_t)/(R_env-R_t)]^(3/4), "
                     "R_t = 0.30*R_env"
                 ),
@@ -547,6 +555,7 @@ class GravisEngine:
                     "accel_ratio": config.accel_ratio,
                     "galactic_radius_kpc": config.galactic_radius,
                     "m_stellar": m_stellar,
+                    "f_gas": f_gas,
                 },
             ))
 

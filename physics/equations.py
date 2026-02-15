@@ -309,18 +309,23 @@ def gfd_poisson_eq(r_kpc, m_solar, accel_ratio=1.0, galactic_radius_kpc=0.0):
 
 
 def gfd_structure_eq(r_kpc, m_solar, accel_ratio=1.0,
-                     galactic_radius_kpc=0.0, m_stellar=0.0):
+                     galactic_radius_kpc=0.0, m_stellar=0.0,
+                     f_gas=0.0):
     """
     GFD+: zero-parameter galactic rotation.
 
     Combines the DTG covariant completion with a structural release
-    term that activates outside the throat:
+    term that activates outside the throat, scaled by gas fraction:
 
-        g(r) = g_DTG(r) + g_struct(r)
+        g(r) = g_DTG(r) + f_gas * g_struct(r)
 
         g_DTG   = (1/2)[g_N + sqrt(g_N^2 + 4*g_N*a0)]
         g_struct = (4/13) * G*M_star/R_t^2 * [(r-R_t)/(R_env-R_t)]^(3/4)
                  = 0  for r <= R_t
+
+    The gas fraction f_gas modulates the structural release: gas serves
+    as the medium through which the field origin's structural energy
+    propagates outward. No gas means no release channel.
 
     Every piece derived from topology:
         4/13 = structural excess from Poisson equation (17/13 - 1)
@@ -342,12 +347,16 @@ def gfd_structure_eq(r_kpc, m_solar, accel_ratio=1.0,
         Total stellar mass (bulge + disk) in solar masses. Not enclosed
         mass, but total, since it represents the entire field origin's
         structural contribution.
+    f_gas : float, optional
+        Gas fraction (0 to 1). Scales the structural release amplitude.
+        Gas-rich systems get full structural release; gas-poor systems
+        get proportionally less.
 
     Returns
     -------
     tuple of (float, dict)
         (v_km_s, {"g_N": ..., "g_DTG": ..., "g_struct": ..., "g_total": ...,
-                   "R_t": ..., "xi": ...})
+                   "R_t": ..., "xi": ..., "f_gas": ...})
     """
     THROAT_FRAC = 0.30
     STRUCT_FRAC = 4.0 / 13.0   # 0.3077
@@ -359,7 +368,7 @@ def gfd_structure_eq(r_kpc, m_solar, accel_ratio=1.0,
     if r_kpc <= 0 or m_solar <= 0:
         return 0.0, {
             "g_N": 0.0, "g_DTG": 0.0, "g_struct": 0.0, "g_total": 0.0,
-            "R_t": R_t, "xi": 0.0,
+            "R_t": R_t, "xi": 0.0, "f_gas": f_gas,
         }
 
     # Step 1: DTG covariant completion (same as gfd_eq)
@@ -371,21 +380,21 @@ def gfd_structure_eq(r_kpc, m_solar, accel_ratio=1.0,
     x = aqual_solve_x(y_N)
     g_dtg = a0_eff * x
 
-    # Step 2: Structural release (outside throat only)
+    # Step 2: Structural release (outside throat only), scaled by gas fraction
     g_struct = 0.0
     xi = 0.0
     if r_kpc > R_t and R_env > R_t and m_stellar > 0:
         R_t_m = R_t * KPC_TO_M
         g0 = STRUCT_FRAC * G * m_stellar * M_SUN / (R_t_m * R_t_m)
         xi = (r_kpc - R_t) / (R_env - R_t)
-        g_struct = g0 * (xi ** P_STRUCT)
+        g_struct = f_gas * g0 * (xi ** P_STRUCT)
 
     g_total = g_dtg + g_struct
     v = math.sqrt(g_total * r) / 1000.0
 
     return v, {
         "g_N": gN, "g_DTG": g_dtg, "g_struct": g_struct,
-        "g_total": g_total, "R_t": R_t, "xi": xi,
+        "g_total": g_total, "R_t": R_t, "xi": xi, "f_gas": f_gas,
     }
 
 

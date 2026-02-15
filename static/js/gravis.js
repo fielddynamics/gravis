@@ -222,16 +222,24 @@ const errorBarPlugin = {
         ctx.strokeStyle = '#FFC107';
         ctx.lineWidth = 1.5;
         dataset.data.forEach((point, index) => {
-            if (!point.err) return;
             const element = meta.data[index];
             if (!element) return;
             const x = element.x;
             const yScale = chart.scales.y;
-            const yTop = yScale.getPixelForValue(point.y + point.err);
-            const yBottom = yScale.getPixelForValue(point.y - point.err);
-            ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBottom); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x - 4, yTop); ctx.lineTo(x + 4, yTop); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x - 4, yBottom); ctx.lineTo(x + 4, yBottom); ctx.stroke();
+            const yCenter = yScale.getPixelForValue(point.y);
+            // Draw error whiskers if error is present
+            if (point.err) {
+                const yTop = yScale.getPixelForValue(point.y + point.err);
+                const yBottom = yScale.getPixelForValue(point.y - point.err);
+                ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBottom); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(x - 4, yTop); ctx.lineTo(x + 4, yTop); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(x - 4, yBottom); ctx.lineTo(x + 4, yBottom); ctx.stroke();
+            }
+            // Always draw a filled center dot so it is visible on top of curves
+            ctx.fillStyle = '#FFC107';
+            ctx.beginPath();
+            ctx.arc(x, yCenter, 3, 0, 2 * Math.PI);
+            ctx.fill();
         });
         ctx.restore();
     }
@@ -1026,8 +1034,8 @@ function interpolateCurve(datasetIndex, radius) {
             return y0 + t * (y1 - y0);
         }
     }
-    // Beyond curve range
-    return data[data.length - 1].y;
+    // Beyond curve range -- return null to avoid stale extrapolation
+    return null;
 }
 
 /** Shorthand: interpolate GFD curve (dataset 1) */
@@ -1601,6 +1609,9 @@ function renderCurves(data) {
     const cdmData = [];
     const gfdStructureData = [];
 
+    // Clip GFD+ at the field horizon (R_env)
+    var rEnv = getGalacticRadius();
+
     for (let i = 0; i < data.radii.length; i++) {
         newtonianData.push({x: data.radii[i], y: data.newtonian[i]});
         dtgData.push({x: data.radii[i], y: data.dtg[i]});
@@ -1608,7 +1619,7 @@ function renderCurves(data) {
         if (data.cdm) {
             cdmData.push({x: data.radii[i], y: data.cdm[i]});
         }
-        if (data.gfd_structure) {
+        if (data.gfd_structure && (!rEnv || data.radii[i] <= rEnv + 0.5)) {
             gfdStructureData.push({x: data.radii[i], y: data.gfd_structure[i]});
         }
     }
