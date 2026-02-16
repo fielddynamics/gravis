@@ -38,7 +38,7 @@ The results are consistent and striking: galaxies at high redshift rotate faster
 | 2.2 | 1.26 | Straatman+2017 (ZFIRE) | 2017 |
 | 3.0 | 1.29 | Ubler+2017 (KMOS3D) | 2017 |
 
-The most dramatic single measurement comes from the SINS survey. Galaxy BX442, observed at redshift z = 2 with adaptive optics on the VLT, rotates 27% faster than the local Tully-Fisher relation predicts. This galaxy is a grand-design spiral, fully formed, with well-ordered rotation, just 3 billion years after the Big Bang.
+The most dramatic single measurement comes from the SINS survey. Galaxy BX442, observed at redshift z = 2.18 with adaptive optics on the VLT (Law et al. 2012; Cresci et al. 2009), rotates 27% faster than the local Tully-Fisher relation predicts. This galaxy is a grand-design spiral, fully formed, with well-ordered rotation, just 3 billion years after the Big Bang.
 
 Lambda-CDM predicts a flat line at 1.0 in this table. The velocity ratio should not change. Yet eight of nine data points lie above 1.0, and the trend is systematic: higher redshift, faster rotation. This is not explained by scatter or measurement error. Six independent survey teams, using different telescopes, different instruments, and different analysis techniques, all find the same pattern.
 
@@ -99,13 +99,13 @@ This is the same mathematical operation that appears throughout optics: converti
     Scatter factor:  (k / pi)^(1/4)  =  1.062    (+/- 6.2%)
 ```
 
-This defines a **measurement cage** that applies to any quantity measured through the gravity field's topology. In the Hubble tension document, this cage predicts the spread of H0 measurements between 65.8 and 74.3 km/s/Mpc. Here, it predicts the spread of TF velocity ratios around the GFD curve. The same lens, the same cage, applied to a completely different observable.
+This defines a **measurement cage** that applies to any quantity measured through the gravity field's topology. In the Hubble tension document, this cage predicts the spread of H0 measurements between 66.2 and 74.7 km/s/Mpc. Here, it predicts the spread of TF velocity ratios around the GFD curve. The same lens, the same cage, applied to a completely different observable.
 
 ---
 
 ## Why Galaxies Spin Faster at High Redshift
 
-The explanation comes from the covariant completion of the dual tetrad topology: a scalar-tensor action with zero free parameters.
+The explanation comes from Gravity Field Dynamics (GFD), a covariant, parameter-free theory expressed through dual-tetrad gravity. The GFD action is a scalar-tensor action with zero free parameters.
 
 **Step 1: The acceleration scale evolves.**
 
@@ -115,9 +115,9 @@ The characteristic acceleration a0 marks the boundary between full coupling (New
     a0  =  c * H / (2 * pi)  *  sqrt(k / pi)
 ```
 
-The Hubble parameter H is not constant. It evolves with redshift as H(z). At redshift z = 2, H(z) is roughly 2.5 times larger than H(0). Because a0 is proportional to H, the acceleration scale at z = 2 was 2.5 times larger than today.
+The Hubble parameter H is not constant. It evolves with redshift as H(z). At redshift z = 2, H(z) is roughly 3 times its present value. Because a0 is proportional to H, the acceleration scale at z = 2 was correspondingly larger.
 
-This is a specific prediction of the topology. Standard MOND treats a0 as a universal constant. GFD derives it from the Hubble horizon, and the Hubble horizon changes with cosmic time. An evolving a0 is a direct, testable consequence of the covariant completion.
+This is a specific prediction of the topology. Standard MOND treats a0 as a universal constant. GFD derives it from the Hubble horizon, and the Hubble horizon changes with cosmic time. An evolving a0 is a direct, testable consequence of GFD.
 
 **Step 2: Rotation velocity depends on a0.**
 
@@ -142,7 +142,7 @@ Combining Steps 1 and 2, the velocity ratio at any redshift z relative to today 
                   =  [ H(z) / H(0) ]^(1/4)
 ```
 
-The naive exponent from the BTFR alone is 1/4 = 0.25. The covariant completion refines this. The scalar-tensor action contains a disformal coupling term, e^(-2*Phi/c^2), which governs how photons propagate through the scalar field (the factor of 2 counts the two tetrahedral field chambers). This coupling, together with the three-level Lagrangian density F(y) = y - 2*sqrt(y) + 2*ln(1 + sqrt(y)), modifies the effective TF slope, reducing the exponent from 0.25 to:
+The naive exponent from the BTFR alone is 1/4 = 0.25. The GFD action refines this. The scalar-tensor action contains a disformal coupling term, e^(-2*Phi/c^2), which governs how photons propagate through the scalar field (the factor of 2 counts the two tetrahedral field chambers). This coupling, together with the three-level Lagrangian density F(y) = y - 2*sqrt(y) + 2*ln(1 + sqrt(y)), modifies the effective TF slope, reducing the exponent from 0.25 to:
 
 ```
     Exponent  =  0.17
@@ -154,7 +154,7 @@ The final prediction:
     v(z) / v(0)  =  [ H(z) / H0 ]^0.17
 ```
 
-This is the blue curve on the TF Evolution chart. Every input is either a measured cosmological parameter (H0, Omega_m, Omega_Lambda for computing H(z)) or a topological constant (k = 4). The exponent 0.17 is derived from the covariant completion's scalar-tensor action, not fitted to the TF data.
+This is the blue curve on the TF Evolution chart. Every input is either a measured cosmological parameter (H0, Omega_m, Omega_Lambda for computing H(z)) or a topological constant (k = 4). The exponent 0.17 is derived from the GFD action, not fitted to the TF data.
 
 ---
 
@@ -165,20 +165,20 @@ The prediction can now be compared directly to the IFU survey data.
 | z | Observed v(z)/v(0) | GFD Prediction | Deviation |
 |---|-------------------|----------------|-----------|
 | 0.0 | 1.00 +/- 0.02 | 1.000 | 0.0% |
-| 0.3 | 1.04 +/- 0.05 | 1.025 | +1.5% |
-| 0.6 | 1.06 +/- 0.06 | 1.045 | +1.4% |
-| 0.9 | 1.10 +/- 0.07 | 1.063 | +3.5% |
-| 1.0 | 1.10 +/- 0.06 | 1.069 | +2.9% |
-| 1.5 | 1.13 +/- 0.08 | 1.099 | +2.8% |
-| 2.0 | 1.21 +/- 0.09 | 1.127 | +7.4% |
-| 2.2 | 1.26 +/- 0.10 | 1.139 | +10.6% |
-| 3.0 | 1.29 +/- 0.12 | 1.177 | +9.6% |
+| 0.3 | 1.04 +/- 0.05 | 1.026 | +1.3% |
+| 0.6 | 1.06 +/- 0.06 | 1.057 | +0.2% |
+| 0.9 | 1.10 +/- 0.07 | 1.090 | +0.9% |
+| 1.0 | 1.10 +/- 0.06 | 1.101 | -0.1% |
+| 1.5 | 1.13 +/- 0.08 | 1.154 | -2.1% |
+| 2.0 | 1.21 +/- 0.09 | 1.203 | +0.6% |
+| 2.2 | 1.26 +/- 0.10 | 1.222 | +3.1% |
+| 3.0 | 1.29 +/- 0.12 | 1.289 | +0.0% |
 
-All nine data points fall within the +/- 6.2% measurement cage of the GFD curve, or within their stated 1-sigma error bars. The GFD prediction captures the systematic upward trend: faster rotation at higher redshift, with the correct shape and approximate magnitude.
+All nine data points fall within the +/- 6.2% measurement cage of the GFD curve, with a maximum deviation of 3.1% (at z = 2.2). The GFD prediction captures not just the systematic upward trend, but the correct shape, magnitude, and inflection of the velocity ratio curve across the full redshift range.
 
 Lambda-CDM's prediction is a flat line at 1.0. At z = 2, the observed ratio is 1.21, more than 20% above the standard model prediction and more than 2 sigma from the flat line. At z = 3, the discrepancy grows to 29%.
 
-The data do not merely prefer GFD over Lambda-CDM. They prefer a specific functional form, [H(z)/H0]^0.17, that emerges from the topology. The shape of the curve, its inflection point, its rate of rise, all follow from the covariant completion without adjustment.
+The data do not merely prefer GFD over Lambda-CDM. They prefer a specific functional form, [H(z)/H0]^0.17, that emerges from the topology. The shape of the curve, its inflection point, its rate of rise, all follow from GFD without adjustment.
 
 ---
 
@@ -188,7 +188,7 @@ The connection between TF evolution and the Hubble tension is not a coincidence.
 
 **The Hubble tension** arises because the aperture throughput sqrt(k/pi) = 1.128 corrects the naive MOND H0 prediction (78.9 km/s/Mpc) down to the observed range (67 to 73 km/s/Mpc). The GFD derivation gives H = 70.29 km/s/Mpc with zero free parameters. The scatter between early-universe and late-universe measurements is predicted by the measurement cage (k/pi)^(1/4) = +/- 6.2%.
 
-**TF evolution** arises because the same a0 that connects to H through the topology evolves with H(z). The covariant completion turns this evolution into a specific prediction: v(z)/v(0) = [H(z)/H0]^0.17. The same measurement cage (+/- 6.2%) bounds the scatter in TF observations.
+**TF evolution** arises because the same a0 that connects to H through the topology evolves with H(z). GFD turns this evolution into a specific prediction: v(z)/v(0) = [H(z)/H0]^0.17. The same measurement cage (+/- 6.2%) bounds the scatter in TF observations.
 
 Both predictions share the same origin:
 
@@ -214,7 +214,7 @@ The predictions are specific and falsifiable, and the observational frontier is 
 
 **Euclid**, launched in 2023, will survey 15,000 square degrees of sky and measure redshifts for billions of galaxies. Its combination of wide-field near-infrared imaging and spectroscopy will provide TF measurements across a continuous redshift range from 0.3 to 2.5, filling in the sparse data points in the current table with statistical power that individual surveys cannot match.
 
-**LIGO, Virgo, and KAGRA** test the topology from a different direction entirely. The covariant completion predicts a specific mass for the massive graviton, determined by the five beta parameters (1, 0, 16, 0, 1) of the bimetric interaction potential. Gravitational wave dispersion measurements constrain this mass spectrum independently of any galaxy observation.
+**LIGO, Virgo, and KAGRA** test the topology from a different direction entirely. GFD predicts a specific mass for the massive graviton, determined by the five beta parameters (1, 0, 16, 0, 1) of the bimetric interaction potential. Gravitational wave dispersion measurements constrain this mass spectrum independently of any galaxy observation.
 
 The standard model and the topological framework make opposite predictions for TF evolution. One predicts a flat line. The other predicts a rising curve with a specific exponent. Nature will distinguish between them, and the data to do so are being collected now.
 
@@ -228,6 +228,7 @@ The standard model and the topological framework make opposite predictions for T
 - Kassin, S. et al. (2007). "The Stellar Mass Tully-Fisher Relation to z ~ 1.2." *ApJ*, 660, L35.
 - Puech, M. et al. (2008). "IMAGES. III. The evolution of the near-infrared Tully-Fisher relation." *A&A*, 484, 173.
 - Cresci, G. et al. (2009). "Gas accretion as the origin of chemical abundance gradients in distant galaxies." *ApJ*, 697, 115.
+- Law, D. R. et al. (2012). "High velocity dispersion in a rare grand-design spiral galaxy at redshift z = 2.18." *Nature*, 487, 338.
 - Miller, S. et al. (2011). "The Assembly History of Disk Galaxies. I. The Tully-Fisher Relation to z ~ 1.3." *ApJ*, 741, 115.
 - Ubler, H. et al. (2017). "The Evolution of the Tully-Fisher Relation between z ~ 2.3 and z ~ 0.9 with KMOS3D." *ApJ*, 842, 121.
 - Straatman, C. et al. (2017). "ZFIRE: The Evolution of the Stellar Mass Tully-Fisher Relation to Redshift ~ 2.2." *ApJ*, 839, 57.

@@ -1,6 +1,6 @@
 # GRAVIS: Gravity Field Dynamics Research Platform
 
-A zero-parameter rotation curve prediction tool using **Gravity Field Dynamics**, implementing the **Dual Tetrad Gravity** (DTG) covariant completion.
+A zero-parameter rotation curve prediction tool implementing **Gravity Field Dynamics** (GFD), a covariant, parameter-free theory of gravity expressed through **Dual-Tetrad Gravity** (DTG).
 
 Author: Stephen Nelson | Source: [github.com/fielddynamics/gravis](https://github.com/fielddynamics/gravis)
 
@@ -8,13 +8,13 @@ Supplemental tool for: Nelson, S. (2026). *Dual Tetrad Topology and the Field Or
 
 ![GRAVIS Application Screenshot](images/gravis-app.png)
 
-### The Covariant Completion
+### The GFD Field Equation
 
-Given only the independently measured baryonic mass distribution of a galaxy, GRAVIS computes the full rotation curve with no dark matter and no free parameters. The core equation is the DTG covariant completion:
+Given only the independently measured baryonic mass distribution of a galaxy, GRAVIS computes the full rotation curve with no dark matter and no free parameters. The core equation is the closed-form solution of the GFD field equation:
 
 $$g(r) = \frac{1}{2}\left[g_N + \sqrt{g_N^2 + 4\,g_N\,a_0}\right]$$
 
-where $g_N = GM(<r)/r^2$ is the Newtonian gravitational acceleration from baryons alone. This closed-form solution arises from the constitutive law $\mu(x) = x/(1+x)$, derived from topological closure of the dual tetrahedral metric. In the deep-MOND limit ($g_N \ll a_0$), it reduces to $g \approx \sqrt{g_N \, a_0}$; in the Newtonian limit ($g_N \gg a_0$), it recovers $g \approx g_N$.
+where $g_N = GM(<r)/r^2$ is the Newtonian gravitational acceleration from baryons alone. This closed-form solution arises from the GFD field equation $x^2/(1+x) = g_N/a_0$, where $x = g/a_0$. The field equation is derived from the scalar Lagrangian $\mathcal{F}(y)$ of the dual-tetrad topology, not from an interpolating function. In the deep-field limit ($g_N \ll a_0$), it reduces to $g \approx \sqrt{g_N \, a_0}$; in the Newtonian limit ($g_N \gg a_0$), it recovers $g \approx g_N$.
 
 The characteristic acceleration scale $a_0$ is derived from first principles:
 
@@ -27,14 +27,14 @@ where $k = 4$ is the simplex number for $d = 3$, $m_e$ is the electron mass, and
 **Forward prediction (M -> v):** Supply a three-component baryonic mass model (Hernquist bulge + exponential stellar disk + exponential gas disk) and GRAVIS returns rotation curves under five frameworks:
 
 - **Newtonian** -- standard $1/r^2$ gravity, baryons only
-- **GFD (Dual Tetrad Gravity)** -- AQUAL field equation with $\mu(x) = x/(1+x)$, derived from topological closure
+- **GFD (Gravity Field Dynamics)** -- field equation $x^2/(1+x) = g_N/a_0$, derived from the GFD Lagrangian
 - **GFD\u03C6 (structural release)** -- GFD plus a gas-fraction-scaled structural term from stellated field origins, zero free parameters
 - **Classical MOND** -- AQUAL field equation with $\mu(x) = x/\sqrt{1+x^2}$ (Bekenstein & Milgrom 1984)
 - **CDM + NFW** -- abundance-matched dark matter halo with NFW profile
 
 All five theories are rendered simultaneously on the same chart alongside published observational data with error bars, enabling direct visual comparison.
 
-**Inverse inference (v -> M):** Given an observed circular velocity at a radius, infer the enclosed baryonic mass required by DTG. Multi-point consistency analysis propagates errors and computes deviation statistics across all observed radii.
+**Inverse inference (v -> M):** Given an observed circular velocity at a radius, infer the enclosed baryonic mass required by GFD. Multi-point consistency analysis propagates errors and computes deviation statistics across all observed radii.
 
 ## Interactive Exploration
 
@@ -75,7 +75,7 @@ gravis/
     constants.py          CODATA 2022 / IAU 2015 physical constants
     mass_model.py         Distributed mass model (Hernquist + exponential)
     newtonian.py          Newtonian gravity: v_c = sqrt(G M(<r) / r)
-    aqual.py              DTG solver: mu(x) = x/(1+x), AQUAL field equation
+    aqual.py              GFD solver: x^2/(1+x) = g_N/a0, from Lagrangian F(y)
     equations.py          Unified equation library (GFD, GFDphi, MOND, CDM)
     engine.py             Multi-stage computation engine
     mond.py               Classical MOND solver: mu(x) = x/sqrt(1+x^2)
@@ -95,20 +95,16 @@ gravis/
 
 ## Physics
 
-### AQUAL Field Equation
+### Field Equation
 
-Both DTG and classical MOND solve the same class of field equation:
+GFD and classical MOND produce different algebraic field equations relating the true gravitational acceleration $g$ to the Newtonian acceleration $g_N = GM(<r)/r^2$. Writing $x = g/a_0$ and $y_N = g_N/a_0$:
 
-$$\mu\!\left(\frac{|\nabla\Phi|}{a_0}\right) \nabla\Phi = \nabla\Phi_N$$
+| Theory | Field Equation | Origin |
+|--------|---------------|--------|
+| GFD | $x^2/(1+x) = y_N$ | Derived from the GFD Lagrangian $\mathcal{F}(y)$ |
+| MOND | $x^2/\sqrt{1+x^2} = y_N$ | Empirical (Bekenstein & Milgrom 1984) |
 
-where $\Phi_N$ is the Newtonian potential. The two theories differ only in the constitutive law $\mu(x)$:
-
-| Theory | Constitutive Law | Origin |
-|--------|-----------------|--------|
-| DTG | $\mu(x) = x/(1+x)$ | Topological closure of dual tetrahedron metric |
-| MOND | $\mu(x) = x/\sqrt{1+x^2}$ | Empirical fit (Bekenstein & Milgrom 1984) |
-
-Both admit closed-form solutions. DTG's function was independently identified as the empirically preferred form by Famaey & Binney (2005).
+Both admit closed-form analytic solutions and share the same deep-field limit ($g \approx \sqrt{g_N \, a_0}$), but they differ in origin and in the transition regime. GFD's field equation follows from a Lagrangian uniquely determined by the dual-tetrad topology. MOND's is an empirical choice. The GFD form was independently identified as the empirically preferred one by Famaey & Binney (2005).
 
 ### Galaxy Mass Model
 

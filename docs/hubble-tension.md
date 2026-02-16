@@ -20,7 +20,7 @@ To understand the resolution, we need to revisit something that textbook physics
 
 General Relativity describes gravity through the metric tensor, a mathematical object that encodes how spacetime curves. In 1928, Einstein himself showed that this metric can be decomposed into a set of four basis vectors called a **tetrad** (or vierbein). These four vectors, one for time and three for space, define a local reference frame at every point in spacetime. This is not speculative physics; it is the standard tetrad formalism found in Misner, Thorne, and Wheeler's *Gravitation* and Wald's *General Relativity*.
 
-The tetrad tells us something important: **the gravitational field has a local frame with definite structure.** At every point, four directions must be defined to fully specify the field. Fewer than four and the frame is incomplete; the metric becomes degenerate and the physics breaks down. This requirement, that the field must fully close at every point, is called **field closure**.
+The tetrad tells us something important: **the gravitational field has a local frame with definite structure.** At every point, four directions must be defined to fully specify the field. Fewer than four and the frame is incomplete; the metric becomes degenerate and the physics breaks down. This requirement, that every field configuration must achieve consistency with the ambient field topology through all four coupling channels, is called **field closure**. It is not a one-time event but a continuous process: as a field configuration evolves, it must maintain closure at every point, at every moment.
 
 > For a deeper introduction to how the gravitational field works as a structured medium, see the [Exploring the Gravity Field](/field) page.
 
@@ -47,7 +47,7 @@ This dual tetrad structure has a definite field coupling architecture. It couple
 | Bimetric coupling | k^2 = 16 | The 16 Hassan-Rosen interaction channels |
 | **Total** | **f(k) = 1 + k + k^2 = 21** | **The coupling polynomial** |
 
-Of the 12 geometric neighbours touching each field region (just like those oranges), only **4 are open coupling channels** (the tetrahedral faces). The remaining **8 are geometrically closed**: they touch, but they do not transmit the field coupling. This is not a parameter; it is the geometry of three-dimensional packing.
+Of the 12 geometric neighbours touching each field region (just like those oranges), only **4 are open field coupling channels** (the tetrahedral faces). The remaining **8 are topologically closed**: they touch, but they do not transmit the field coupling. This four-active, eight-closed field coupling topology is not a parameter; it is the geometry of three-dimensional packing.
 
 ---
 
@@ -104,7 +104,7 @@ The resolution: **we do not live in abstract flat space.** We measure through a 
                =  69.92 km/s/Mpc
 ```
 
-This matches the GW170817 gravitational wave measurement (70.0 +12/-8 km/s/Mpc) to **0.11%**. The gravitational wave standard siren requires no distance ladder and no CMB model assumptions; it measures H directly from wave amplitude and host galaxy redshift. It is the purest spacetime measurement we have.
+This already falls within the range of all major measurements, and it matches the GW170817 gravitational wave standard siren (70.0 +12/-8 km/s/Mpc) to 0.1%. The full GFD derivation below refines this to **70.29 km/s/Mpc** using the topology alone.
 
 **The scatter itself is predicted.** Different measurement methods sample different portions of the frame transition from flat tetrad to curved horizon. The geometric mean of partial corrections through the aperture gives:
 
@@ -112,16 +112,16 @@ This matches the GW170817 gravitational wave measurement (70.0 +12/-8 km/s/Mpc) 
     Scatter factor  =  (k / pi)^(1/4)  =  1.062    (+/- 6.2%)
 ```
 
-This defines a **measurement cage** spanning 65.8 to 74.3 km/s/Mpc. All six major measurement methods (Planck, BAO, GW170817, TRGB, SH0ES, Masers) fall within this range.
+Applied to the GFD prediction of 70.29 km/s/Mpc, this defines a **measurement cage** spanning 66.2 to 74.7 km/s/Mpc. All six major measurement methods (Planck, BAO, GW170817, TRGB, SH0ES, Masers) fall within this range.
 
-| Method | H0 (km/s/Mpc) | Deviation from 69.92 |
+| Method | H0 (km/s/Mpc) | Deviation from 70.29 |
 |--------|---------------|---------------------|
-| Planck (CMB) | 67.4 +/- 0.5 | -3.6% |
-| BAO | 68.0 +/- 1.5 | -2.7% |
-| GW170817 | 70.0 +12/-8 | +0.1% |
-| TRGB | 72.5 +/- 1.7 | +3.7% |
-| SH0ES | 73.0 +/- 1.0 | +4.4% |
-| Masers | 73.9 +/- 3.0 | +5.7% |
+| Planck (CMB) | 67.4 +/- 0.5 | -4.1% |
+| BAO | 68.0 +/- 1.5 | -3.3% |
+| GW170817 | 70.0 +12/-8 | -0.4% |
+| TRGB | 72.5 +/- 1.7 | +3.1% |
+| SH0ES | 73.0 +/- 1.0 | +3.9% |
+| Masers | 73.9 +/- 3.0 | +5.1% |
 
 Early-universe methods (Planck, BAO) integrate from cosmological distances, accumulating more of the curved-boundary correction, and measure lower. Late-universe methods (SH0ES, TRGB, Masers) measure more locally, sample less of the correction, and measure higher. The "tension" between 67 and 73 is not a crisis. It is the predicted topological signature of measuring through k = 4 structure.
 

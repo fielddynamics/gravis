@@ -78,6 +78,10 @@ function externalTooltipHandler(context) {
     }
 
     el.innerHTML = html;
+    if (!html) {
+        el.style.opacity = '0';
+        return;
+    }
     el.style.opacity = '1';
 
     var pos = context.chart.canvas.getBoundingClientRect();
@@ -301,25 +305,30 @@ function createTfChart() {
                     external: externalTooltipHandler,
                     filter: function(item) {
                         var lbl = item.dataset.label;
-                        return lbl !== 'GFD cage lower' && lbl !== 'Selected z';
+                        return lbl !== 'GFD +/- 6.2% cage'
+                            && lbl !== 'GFD cage lower'
+                            && lbl !== 'Selected z';
                     },
                     callbacks: {
                         title: function(items) {
                             if (!items.length) return '';
+                            var first = items[0];
                             // SINS highlight
-                            if (ctx.datasetIndex === 5 && sinsHighlight) {
+                            if (first.datasetIndex === 5 && sinsHighlight) {
                                 return 'SINS z = ' + sinsHighlight.z.toFixed(1) + '  |  Cresci+2009';
                             }
                             // Observed TF data
-                            if (ctx.datasetIndex === 4 && observedData[ctx.dataIndex]) {
-                                var obs = observedData[ctx.dataIndex];
+                            if (first.datasetIndex === 4 && observedData[first.dataIndex]) {
+                                var obs = observedData[first.dataIndex];
                                 return 'z = ' + obs.z.toFixed(1) + '  |  ' + obs.source;
                             }
-                            return 'z = ' + ctx.parsed.x.toFixed(2);
+                            return 'z = ' + first.parsed.x.toFixed(2);
                         },
                         label: function(ctx) {
                             var ds = ctx.dataset;
-                            if (ds.label === 'GFD cage lower' || ds.label === 'Selected z') return null;
+                            if (ds.label === 'GFD +/- 6.2% cage'
+                                || ds.label === 'GFD cage lower'
+                                || ds.label === 'Selected z') return null;
                             var ratio = ctx.parsed.y;
                             var pct = ((ratio - 1.0) * 100).toFixed(1);
                             var sign = pct >= 0 ? '+' : '';
