@@ -176,6 +176,15 @@
                         <input type="range" id="galactic-radius-slider" min="2" max="200" step="1" value="50">
                     </div>
 
+                    <div class="control-group" id="vortex-strength-group">
+                        <div class="control-label">
+                            <span>Origin Throughput (GFD&sigma;)</span>
+                            <span class="control-value" id="vortex-strength-value">auto</span>
+                            <button id="vortex-auto-btn" class="auto-btn active" title="Reset to auto-calculated value">Auto</button>
+                        </div>
+                        <input type="range" id="vortex-strength-slider" min="-3" max="3" step="0.05" value="1">
+                    </div>
+
                     <div class="control-group" id="velocity-control" style="display: none;">
                         <div class="control-label">
                             <span>Observed Velocity (v)</span>
@@ -253,11 +262,11 @@
                         <label class="theory-chip" data-series="newtonian" style="--chip-color: #ff6b6b;" title="Newtonian gravity: v = sqrt(G M / r)">
                             <input type="checkbox" checked> Newtonian
                         </label>
-                        <label class="theory-chip" data-series="gfd" style="--chip-color: #4da6ff;" title="Dual Tetrad Gravity: covariant completion via the SST action">
-                            <input type="checkbox" checked> GFD
+                        <label class="theory-chip" data-series="gfd" style="--chip-color: #4da6ff;" title="GFD: zero-parameter prediction from the scalar-tensor action">
+                            <input type="checkbox" checked> GFD (Dual Tetrad)
                         </label>
-                        <label class="theory-chip" data-series="gfd_structure" style="--chip-color: #76FF03;" title="GFD + gas-fraction-scaled structural release: g = g_DTG + f_gas * g_struct">
-                            <input type="checkbox" checked> GFD&#966;
+                        <label class="theory-chip" data-series="gfd_symmetric" style="--chip-color: #00E5FF;" title="GFD with Origin Throughput: vortex reflection of structural release through the Field Origin (R_t). Gas leverage beyond R_t counterbalances stellar compression inside R_t, setting the throughput direction and amplitude.">
+                            <input type="checkbox" checked> GFD&#963; (Dual Tetrad)
                         </label>
                         <label class="theory-chip" data-series="mond" style="--chip-color: #9966ff;" title="Modified Newtonian Dynamics (Milgrom 1983): mu(x) = x/sqrt(1+x^2)">
                             <input type="checkbox" checked> MOND

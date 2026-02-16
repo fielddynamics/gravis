@@ -21,7 +21,7 @@ import math
 from flask import jsonify, request
 
 from physics.services import GravisService
-from physics.engine import GravisConfig, GravisEngine
+from physics.engine import GravisConfig, GravisEngine, auto_vortex_strength
 from physics import constants
 from physics.mass_model import enclosed_mass, total_mass
 from physics.inference import infer_mass
@@ -64,6 +64,8 @@ class RotationService(GravisService):
             "mass_model": mass_model,
             "observations": config.get("observations"),
             "galactic_radius": config.get("galactic_radius"),
+            # None means "use auto"; explicit value means user override
+            "vortex_strength": config.get("vortex_strength"),
         }
 
     def compute(self, config):
@@ -101,6 +103,15 @@ class RotationService(GravisService):
                 'method': 'abundance matching (Moster+ 2013)',
             }
 
+        # Compute auto Origin Throughput from gas leverage
+        gr = config.get("galactic_radius")
+        auto_ot = auto_vortex_strength(mass_model, float(gr)) if gr else 0.0
+
+        # Use auto value when no explicit override was sent
+        vortex_val = config.get("vortex_strength")
+        if vortex_val is None:
+            vortex_val = auto_ot
+
         # Run engine pipeline
         engine_config = GravisConfig(
             mass_model=mass_model,
@@ -108,11 +119,16 @@ class RotationService(GravisService):
             num_points=config["num_points"],
             accel_ratio=accel_ratio,
             galactic_radius=config.get("galactic_radius"),
+            vortex_strength=vortex_val,
         )
         engine = GravisEngine.rotation_curve(engine_config, m200=m200)
         result = engine.run()
 
         response = result.to_api_response()
+
+        # Always return the auto-calculated throughput so the frontend
+        # can display and sync the slider.
+        response["auto_origin_throughput"] = auto_ot
 
         if cdm_halo_info:
             cdm_halo_info['m200'] = round(cdm_halo_info['m200'], 2)

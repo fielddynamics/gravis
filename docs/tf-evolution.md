@@ -62,7 +62,7 @@ The coupling hierarchy of this structure is encoded in the polynomial f(k) = 1 +
     f(4) = 1 + 4 + 16 = 21
 ```
 
-These three levels (exist, propagate, interact) determine the gravitational constant G, the characteristic acceleration scale a0, and the covariant field equations. This is not a model with adjustable parameters. It is a geometry with countable channels.
+These three levels (exist, propagate, interact) determine the gravitational constant G, the characteristic acceleration scale a0, and the GFD field equations. This is not a model with adjustable parameters. It is a geometry with countable channels.
 
 > For a deeper introduction to how the gravitational field works as a structured medium, see the [Exploring the Gravity Field](/field) page.
 

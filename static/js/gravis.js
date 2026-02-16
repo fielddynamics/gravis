@@ -60,6 +60,11 @@ const velocitySlider = document.getElementById('velocity-slider');
 const accelSlider = document.getElementById('accel-slider');
 const galacticRadiusSlider = document.getElementById('galactic-radius-slider');
 const galacticRadiusValue = document.getElementById('galactic-radius-value');
+const vortexStrengthSlider = document.getElementById('vortex-strength-slider');
+const vortexStrengthValue = document.getElementById('vortex-strength-value');
+const vortexAutoBtn = document.getElementById('vortex-auto-btn');
+let autoVortexStrength = null;  // last auto-calculated value from API
+let isAutoThroughput = true;    // when true, backend computes the value
 const distanceValue = document.getElementById('distance-value');
 const massValue = document.getElementById('mass-value');
 const velocityValue = document.getElementById('velocity-value');
@@ -200,9 +205,32 @@ function updateMassModelDisplaysOnly() {
 });
 
 // Galactic radius slider listener: updates the display and triggers
-// chart recompute so the GFDphi structural term responds in real time.
+// chart recompute so the GFD-sigma structural term responds in real time.
 galacticRadiusSlider.addEventListener('input', () => {
     galacticRadiusValue.textContent = galacticRadiusSlider.value + ' kpc';
+    debouncedUpdateChart();
+});
+
+// Origin Throughput slider listener: modulates the GFD-sigma structural
+// correction via vortex reflection through the Field Origin.
+vortexStrengthSlider.addEventListener('input', () => {
+    vortexStrengthValue.textContent = parseFloat(vortexStrengthSlider.value).toFixed(2);
+    // Mark as manual override
+    isAutoThroughput = false;
+    vortexAutoBtn.classList.remove('active');
+    debouncedUpdateChart();
+});
+
+// Auto button: switch back to auto mode
+vortexAutoBtn.addEventListener('click', () => {
+    isAutoThroughput = true;
+    vortexAutoBtn.classList.add('active');
+    if (autoVortexStrength !== null) {
+        vortexStrengthSlider.value = autoVortexStrength;
+        vortexStrengthValue.textContent = autoVortexStrength.toFixed(2);
+    } else {
+        vortexStrengthValue.textContent = 'auto';
+    }
     debouncedUpdateChart();
 });
 
@@ -398,12 +426,12 @@ function buildInferenceTooltip(dp) {
         var errStr = (m.err && m.err > 0) ? ' \u00B1 ' + m.err : '';
         html += ttRow('<span style="color:#ffa726;">\u25CF</span> Observed', m.obs_v.toFixed(1) + errStr + ' km/s', '#ffa726');
     }
-    var gfdStructureV2 = interpolateCurve(8, r);
     var newtonV = interpolateCurve(0, r);
     var mondV = interpolateCurve(2, r);
     var cdmV = interpolateCurve(7, r);
-    if (gfdStructureV2 !== null && chart.data.datasets[8].data.length > 0) {
-        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD\u03C6', gfdStructureV2.toFixed(1) + ' km/s', '#76FF03');
+    var gfdSymV2 = interpolateCurve(9, r);
+    if (gfdSymV2 !== null && chart.data.datasets[9].data.length > 0) {
+        html += ttRow('<span style="color:#00E5FF;">\u25CF</span> GFD\u03C3', gfdSymV2.toFixed(1) + ' km/s', '#00E5FF');
     }
     if (newtonV !== null) {
         html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s', '#ef5350');
@@ -492,7 +520,6 @@ function buildObservedTooltip(dp) {
     var errStr = (err > 0) ? ' \u00B1 ' + err : '';
 
     var gfdV = interpolateCurve(1, r);
-    var gfdStructureV = interpolateCurve(8, r);
     var newtonV = interpolateCurve(0, r);
     var mondV = interpolateCurve(2, r);
     var cdmV = interpolateCurve(7, r);
@@ -511,8 +538,9 @@ function buildObservedTooltip(dp) {
     html += '<table style="width:100%;padding:4px 12px 6px;border-spacing:0;">';
     html += ttRow('<span style="color:#ffa726;">\u25CF</span> Observed', vObs.toFixed(1) + errStr + ' km/s', '#ffa726');
     if (gfdV !== null)    html += ttRow('<span style="color:#4da6ff;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s' + fmtDelta(gfdV), '#4da6ff');
-    if (gfdStructureV !== null && chart.data.datasets[8].data.length > 0) {
-        html += ttRow('<span style="color:#76FF03;">\u25CF</span> GFD\u03C6', gfdStructureV.toFixed(1) + ' km/s' + fmtDelta(gfdStructureV), '#76FF03');
+    var gfdSymV = interpolateCurve(9, r);
+    if (gfdSymV !== null && chart.data.datasets[9].data.length > 0) {
+        html += ttRow('<span style="color:#00E5FF;">\u25CF</span> GFD\u03C3', gfdSymV.toFixed(1) + ' km/s' + fmtDelta(gfdSymV), '#00E5FF');
     }
     if (newtonV !== null) html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s' + fmtDelta(newtonV), '#ef5350');
     if (mondV !== null)   html += ttRow('<span style="color:#ab47bc;">\u25CF</span> MOND', mondV.toFixed(1) + ' km/s' + fmtDelta(mondV), '#ab47bc');
@@ -717,7 +745,7 @@ const chart = new Chart(ctx, {
                 pointStyle: 'line',
                 showLine: false
             },
-            // Dataset 4: GFD/GFDphi envelope upper edge (hidden from legend)
+            // Dataset 4: GFD/GFD-sigma envelope upper edge (hidden from legend)
             {
                 label: 'GFD envelope upper',
                 data: [],
@@ -729,7 +757,7 @@ const chart = new Chart(ctx, {
                 pointRadius: 0,
                 fill: {target: 5, above: 'rgba(118, 255, 3, 0.10)', below: 'rgba(118, 255, 3, 0.10)'}
             },
-            // Dataset 5: GFD/GFDphi envelope lower edge (hidden from legend)
+            // Dataset 5: GFD/GFD-sigma envelope lower edge (hidden from legend)
             {
                 label: 'GFD envelope lower',
                 data: [],
@@ -769,6 +797,16 @@ const chart = new Chart(ctx, {
                 data: [],
                 borderColor: '#76FF03',
                 backgroundColor: 'rgba(118, 255, 3, 0.08)',
+                borderWidth: 2.5,
+                tension: 0.4,
+                pointRadius: 0
+            },
+            // Dataset 9: GFD\u03C3 (Origin Throughput: vortex reflection through R_t)
+            {
+                label: 'GFD\u03C3',
+                data: [],
+                borderColor: '#00E5FF',
+                backgroundColor: 'rgba(0, 229, 255, 0.08)',
                 borderWidth: 2.5,
                 tension: 0.4,
                 pointRadius: 0
@@ -907,6 +945,11 @@ async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations
     // Falls back to max_radius on the backend if not provided.
     if (galacticRadius) {
         body.galactic_radius = galacticRadius;
+    }
+    // Origin Throughput: only send explicit value when user has overridden.
+    // When isAutoThroughput is true, omit so the backend uses its own auto value.
+    if (!isAutoThroughput && vortexStrengthSlider) {
+        body.vortex_strength = parseFloat(vortexStrengthSlider.value);
     }
     const resp = await fetch('/api/rotation/curve', {
         method: 'POST',
@@ -1154,27 +1197,23 @@ async function updateBand() {
         return;
     }
 
-    // --- Inference mode: envelope between GFD and GFD\u03C6 ---
+    // --- Inference mode: envelope between GFD and GFD-sigma ---
     var gfdData = chart.data.datasets[1].data;       // GFD
-    var gfdPlusData = chart.data.datasets[8].data;    // GFDphi
+    var gfdSigmaData = chart.data.datasets[9].data;  // GFD-sigma
 
-    if (gfdData.length > 0 && gfdPlusData.length > 0) {
+    if (gfdData.length > 0 && gfdSigmaData.length > 0) {
         // Both curves exist: band = max / min at each point
         var upperData = [], lowerData = [];
-        var len = Math.min(gfdData.length, gfdPlusData.length);
+        var len = Math.min(gfdData.length, gfdSigmaData.length);
         for (var i = 0; i < len; i++) {
             var yGfd = gfdData[i].y;
-            var yPlus = gfdPlusData[i].y;
+            var ySigma = gfdSigmaData[i].y;
             var x = gfdData[i].x;
-            upperData.push({x: x, y: Math.max(yGfd, yPlus)});
-            lowerData.push({x: x, y: Math.min(yGfd, yPlus)});
+            upperData.push({x: x, y: Math.max(yGfd, ySigma)});
+            lowerData.push({x: x, y: Math.min(yGfd, ySigma)});
         }
         chart.data.datasets[4].data = upperData;
         chart.data.datasets[5].data = lowerData;
-    } else if (gfdData.length > 0) {
-        // GFDphi not available: no meaningful band to show
-        chart.data.datasets[4].data = [];
-        chart.data.datasets[5].data = [];
     } else {
         chart.data.datasets[4].data = [];
         chart.data.datasets[5].data = [];
@@ -1193,7 +1232,7 @@ function updateBandLabel() {
     var el = document.getElementById('band-width-display');
     if (!el || lastModelTotal <= 0) return;
     el.innerHTML = '<strong style="color:#e0e0e0;">Band:</strong> '
-        + '<span style="color:#76FF03;">GFD / GFD\u03C6 envelope</span>'
+        + '<span style="color:#00E5FF;">GFD / GFD\u03C3 envelope</span>'
         + '<div style="font-size:0.8em; color:#606060; margin-top:2px;">'
         + 'Shaded region between base GFD and GFD\u03C6 (structural) predictions</div>';
 }
@@ -1524,6 +1563,15 @@ async function updateChart() {
             const data = await fetchRotationCurve(chartMaxR, accelRatio, curveModel, predObs, getGalacticRadius());
             renderCurves(data);
 
+            // Sync auto Origin Throughput from API
+            if (data.auto_origin_throughput !== undefined) {
+                autoVortexStrength = data.auto_origin_throughput;
+                if (isAutoThroughput) {
+                    vortexStrengthSlider.value = autoVortexStrength;
+                    vortexStrengthValue.textContent = autoVortexStrength.toFixed(2);
+                }
+            }
+
             // Show observation points -- use pinned observations if user is fine-tuning,
             // but respect the user's toggle chip state
             var obsEnabled = isChipEnabled('observed');
@@ -1566,6 +1614,15 @@ async function updateChart() {
             const data = await fetchRotationCurve(predMaxR, accelRatio, massModel, predObs, getGalacticRadius());
             renderCurves(data);
 
+            // Sync auto Origin Throughput from API
+            if (data.auto_origin_throughput !== undefined) {
+                autoVortexStrength = data.auto_origin_throughput;
+                if (isAutoThroughput) {
+                    vortexStrengthSlider.value = autoVortexStrength;
+                    vortexStrengthValue.textContent = autoVortexStrength.toFixed(2);
+                }
+            }
+
             // Handle observed data -- show pinned observations even when sliders are adjusted,
             // but respect the user's toggle chip state
             var visibleObs = pinnedObservations || (currentExample ? currentExample.observations : null);
@@ -1594,9 +1651,9 @@ function renderCurves(data) {
     const dtgData = [];
     const mondData = [];
     const cdmData = [];
-    const gfdStructureData = [];
+    const gfdSymmetricData = [];
 
-    // Clip GFDphi at the field horizon (R_env)
+    // Clip GFD-sigma at the field horizon (R_env)
     var rEnv = getGalacticRadius();
 
     for (let i = 0; i < data.radii.length; i++) {
@@ -1606,8 +1663,8 @@ function renderCurves(data) {
         if (data.cdm) {
             cdmData.push({x: data.radii[i], y: data.cdm[i]});
         }
-        if (data.gfd_structure && (!rEnv || data.radii[i] <= rEnv + 0.5)) {
-            gfdStructureData.push({x: data.radii[i], y: data.gfd_structure[i]});
+        if (data.gfd_symmetric && (!rEnv || data.radii[i] <= rEnv + 0.5)) {
+            gfdSymmetricData.push({x: data.radii[i], y: data.gfd_symmetric[i]});
         }
     }
 
@@ -1616,7 +1673,8 @@ function renderCurves(data) {
     chart.data.datasets[1].data = dtgData;
     chart.data.datasets[2].data = mondData;
     chart.data.datasets[7].data = cdmData;
-    chart.data.datasets[8].data = gfdStructureData;
+    chart.data.datasets[8].data = [];
+    chart.data.datasets[9].data = gfdSymmetricData;
 
     // Store CDM halo info for display
     lastCdmHalo = data.cdm_halo || null;
@@ -1813,6 +1871,13 @@ function loadExample() {
         galacticRadiusValue.textContent = example.galactic_radius + ' kpc';
     }
 
+    // Set to auto mode: the backend computes Origin Throughput from
+    // gas leverage. No jumping since the first (and only) render uses
+    // the auto value. The slider syncs from the API response.
+    isAutoThroughput = true;
+    vortexAutoBtn.classList.add('active');
+    vortexStrengthValue.textContent = 'auto';
+
     updateDisplays();
     updateChart().then(() => {
         chart.resetZoom();
@@ -1870,9 +1935,9 @@ function setMode(mode) {
         // Update header to indicate shape mode
         document.querySelector('.mass-model-header-text').textContent = 'Mass Distribution Shape (masses auto-inferred)';
 
-        // Force GFD and GFDphi chips on and lock them (required for inference)
+        // Force GFD and GFD-sigma chips on and lock them (required for inference)
         forceChipOn('gfd');
-        forceChipOn('gfd_structure');
+        forceChipOn('gfd_symmetric');
     }
 
     updateExamplesDropdown();
@@ -2051,7 +2116,7 @@ var theoryDatasetMap = {
     'observed':      [3],       // Observed Data points
     'newtonian':     [0],       // Newtonian Gravity
     'gfd':           [1, 4, 5], // GFD curve + confidence band upper/lower
-    'gfd_structure': [8],       // GFDphi
+    'gfd_symmetric': [9],       // GFDsigma (Origin Throughput)
     'mond':          [2],       // Classical MOND
     'cdm':           [7]        // CDM + NFW
 };
@@ -2108,10 +2173,10 @@ function initTheoryToggles() {
             e.preventDefault();
             var seriesKey = this.getAttribute('data-series');
 
-            // In inference mode, GFD and GFDphi are locked on (required
+            // In inference mode, GFD and GFD-sigma are locked on (required
             // for inference computation). Skip toggle for these chips.
             if (currentMode === 'inference' &&
-                (seriesKey === 'gfd' || seriesKey === 'gfd_structure')) {
+                (seriesKey === 'gfd' || seriesKey === 'gfd_symmetric')) {
                 return;
             }
 
@@ -2194,7 +2259,7 @@ function initCrosshairReadout() {
             {key: 'observed',      idx: 3, color: '#FFC107', label: 'Observed'},
             {key: 'newtonian',     idx: 0, color: '#ff6b6b', label: 'Newtonian'},
             {key: 'gfd',           idx: 1, color: '#4da6ff', label: 'GFD'},
-            {key: 'gfd_structure', idx: 8, color: '#76FF03', label: 'GFD\u03C6'},
+            {key: 'gfd_symmetric', idx: 9, color: '#00E5FF', label: 'GFD\u03C3'},
             {key: 'mond',          idx: 2, color: '#9966ff', label: 'MOND'},
             {key: 'cdm',           idx: 7, color: '#ffffff', label: 'CDM'}
         ];

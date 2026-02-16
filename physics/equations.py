@@ -398,6 +398,120 @@ def gfd_structure_eq(r_kpc, m_solar, accel_ratio=1.0,
     }
 
 
+def gfd_symmetric_eq(r_kpc, m_solar, accel_ratio=1.0,
+                     galactic_radius_kpc=0.0, m_stellar=0.0,
+                     f_gas=0.0):
+    """
+    GFD symmetric: structural correction applied both sides of R_t.
+
+    Like gfd_structure_eq but with two modifications:
+
+    1. Halved limitation:  f_eff = (1 + f_gas) / 2
+       The raw gas fraction f_gas acts as a limiter on structural
+       release (92% gas -> only 92% of full release).  This formula
+       halves the gap between f_gas and 1.0, letting more structural
+       energy through.  Examples: f_gas=0.92 -> f_eff=0.96,
+       f_gas=0.50 -> f_eff=0.75, f_gas=0.10 -> f_eff=0.55.
+
+    2. Symmetric correction around the Field Origin boundary R_t,
+       applied in velocity space so the visual effect on the rotation
+       curve is truly symmetric:
+       - Outside R_t (r > R_t):  positive structural release adds
+         acceleration, boosting velocity above GFD.
+       - Inside  R_t (r < R_t):  the same acceleration magnitude is
+         computed, its velocity boost calculated, and that boost is
+         subtracted from the GFD base velocity. This produces a
+         visually equal dip below GFD inside R_t.
+
+    Working in velocity space (rather than acceleration space) is
+    necessary because v = sqrt(g*r), and the smaller r inside R_t
+    would otherwise dampen the correction to near invisibility.
+
+    Parameters
+    ----------
+    r_kpc : float
+        Galactocentric radius in kiloparsecs.
+    m_solar : float
+        Enclosed baryonic mass at r_kpc in solar masses.
+    accel_ratio : float, optional
+        Multiplier on a0 (default 1.0).
+    galactic_radius_kpc : float, optional
+        Galactic gravitational horizon R_env in kiloparsecs.
+    m_stellar : float, optional
+        Total stellar mass (bulge + disk) in solar masses.
+    f_gas : float, optional
+        Gas fraction (0 to 1). Limitation halved: f_eff = (1+f_gas)/2.
+
+    Returns
+    -------
+    tuple of (float, dict)
+        (v_km_s, {"g_N": ..., "g_DTG": ..., "g_struct": ..., "g_total": ...,
+                   "R_t": ..., "xi": ..., "f_eff": ...})
+    """
+    THROAT_FRAC = 0.30
+    STRUCT_FRAC = 4.0 / 13.0   # 0.3077
+    P_STRUCT = 3.0 / 4.0       # d/k = 0.75
+
+    R_env = galactic_radius_kpc
+    R_t = THROAT_FRAC * R_env
+    f_eff = (1.0 + f_gas) / 2.0
+
+    if r_kpc <= 0 or m_solar <= 0:
+        return 0.0, {
+            "g_N": 0.0, "g_DTG": 0.0, "g_struct": 0.0, "g_total": 0.0,
+            "R_t": R_t, "xi": 0.0, "f_eff": f_eff,
+        }
+
+    # Step 1: DTG base (same as gfd_eq)
+    r = r_kpc * KPC_TO_M
+    M = m_solar * M_SUN
+    gN = G * M / (r * r)
+    a0_eff = A0 * accel_ratio
+    y_N = gN / a0_eff
+    x = aqual_solve_x(y_N)
+    g_dtg = a0_eff * x
+
+    # Step 2: Symmetric structural correction (velocity space)
+    #
+    # Outside R_t the structural term adds acceleration, boosting v.
+    # Inside  R_t we mirror that boost as a velocity SUBTRACTION so the
+    # visual deviation from GFD is symmetric on the plot.  Working in
+    # acceleration space alone produces an invisible inner dip because
+    # v = sqrt(g*r) and small r dampens the effect.
+    g_struct = 0.0
+    xi = 0.0
+    v_base = math.sqrt(g_dtg * r) / 1000.0
+    v = v_base
+
+    if m_stellar > 0 and R_t > 0:
+        R_t_m = R_t * KPC_TO_M
+        g0 = STRUCT_FRAC * G * m_stellar * M_SUN / (R_t_m * R_t_m)
+
+        if r_kpc > R_t and R_env > R_t:
+            # Outside Field Origin: positive release in acceleration space
+            xi = (r_kpc - R_t) / (R_env - R_t)
+            g_struct = f_eff * g0 * (xi ** P_STRUCT)
+            g_total = g_dtg + g_struct
+            v = math.sqrt(g_total * r) / 1000.0
+        elif r_kpc < R_t:
+            # Inside Field Origin: mirror correction in velocity space.
+            # Compute the velocity boost this same xi would produce if
+            # it were additive, then subtract that delta from v_base.
+            xi = (R_t - r_kpc) / R_t
+            g_add = f_eff * g0 * (xi ** P_STRUCT)
+            v_enhanced = math.sqrt((g_dtg + g_add) * r) / 1000.0
+            v_delta = v_enhanced - v_base
+            v = max(v_base - v_delta, 0.0)
+            g_struct = -g_add  # diagnostic: record the equivalent accel
+
+    g_total = g_dtg + g_struct
+
+    return v, {
+        "g_N": gN, "g_DTG": g_dtg, "g_struct": g_struct,
+        "g_total": g_total, "R_t": R_t, "xi": xi, "f_eff": f_eff,
+    }
+
+
 def mond_eq(r_kpc, m_solar, accel_ratio=1.0):
     """
     Classical MOND circular velocity.

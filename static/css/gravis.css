@@ -1455,6 +1455,37 @@ input[type="range"]::-moz-range-thumb:hover {
     color: #76FF03;
 }
 
+/* Vortex strength slider: cyan accent to associate with GFD-sigma */
+#vortex-strength-group .control-value {
+    color: #00E5FF;
+}
+
+/* Auto button for vortex strength */
+.auto-btn {
+    background: transparent;
+    border: 1px solid #00E5FF;
+    color: #00E5FF;
+    font-size: 0.65em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    transition: background 0.2s, color 0.2s;
+}
+
+.auto-btn:hover {
+    background: #00E5FF;
+    color: #1a1a2e;
+}
+
+.auto-btn.active {
+    background: #00E5FF;
+    color: #1a1a2e;
+}
+
 /* Inference mode: mass sliders heavily dimmed (auto-computed output, not input) */
 .mass-component input[type="range"]:disabled {
     opacity: 0.15;

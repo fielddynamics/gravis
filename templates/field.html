@@ -48,7 +48,7 @@
 
             <p><strong>From geometry:</strong> in three spatial dimensions, the simplest possible shape that encloses a volume is a tetrahedron, a solid with exactly four triangular faces. This is the three-dimensional equivalent of a triangle being the simplest shape that encloses area in two dimensions. You cannot enclose a volume with fewer than four faces. Geometry itself sets the floor: k must be at least 4.</p>
 
-            <p><strong>From observation:</strong> LIGO measured exactly two polarisations of gravitational waves. Where do those two come from? When TetA and TetB couple, the field propagates through k = 4 shared faces. Each face is a triangle, a two-dimensional surface, and a wave passing through that face can oscillate in exactly two independent directions within its plane. Those two transverse directions are the two polarisations: plus and cross. If the field had fewer faces, more independent oscillation modes would remain unconstrained. If it had more, some faces would be redundant and gravity could not propagate at all. Only k = 4 produces exactly two polarisations, matching what LIGO observed. Observation sets the ceiling: k cannot exceed 4.</p>
+            <p><strong>From observation:</strong> LIGO measured exactly two polarisations of gravitational waves: plus and cross. Where do those two come from? Gravitational waves are transverse. In three spatial dimensions, a transverse wave distorts the two-dimensional plane perpendicular to its direction of propagation. Each of the k = 4 tetrahedral faces is a two-dimensional surface, and the two independent deformation modes of that transverse surface are the plus and cross polarisations observed in every gravitational wave detection to date. The tetrahedral face geometry directly determines the polarisation count. Observation sets the ceiling: k cannot exceed 4.</p>
 
             <p>The floor is 4. The ceiling is 4. The gravity field is k = 4 organised.</p>
 
@@ -59,7 +59,7 @@
                 </div>
                 <div class="faq-answer">
                     <p><strong>The simplex theorem</strong> states that in d spatial dimensions, the minimum convex polytope that encloses volume has exactly d + 1 faces. For d = 3: the tetrahedron, with 4 faces. This is not a choice. Three dimensions force it.</p>
-                    <p><strong>The LIGO constraint</strong> works from the other direction. When TetA and TetB couple, the gravitational field propagates through their shared faces. Each face is a triangle, a two-dimensional surface. A wave passing through a 2D face can oscillate transversely in exactly 2 independent directions: these are the plus (+) and cross (&times;) polarisations that LIGO detected. The face geometry determines the polarisation count directly. If k = 3 (three faces, not enough to enclose volume), the unconstrained metric components would allow 4 polarisations, too many. If k = 5, the over-constrained structure would leave 0 propagating modes, and gravity could not propagate at all. Only k = 4 yields exactly 2, matching observation.</p>
+                    <p><strong>The LIGO constraint</strong> works from the other direction. Gravitational waves are transverse: in d = 3 spatial dimensions, a gravitational wave distorts the two-dimensional plane perpendicular to its propagation direction. Each of the k = 4 tetrahedral faces is a two-dimensional surface. The two independent deformation modes of this transverse 2D surface are the plus (+) and cross (&times;) polarisations that LIGO has observed in every detection since 2015. The face geometry of the tetrahedral field chamber directly determines the polarisation count: a 2D surface has exactly 2 independent deformation modes, no more and no fewer. Only k = 4 (four 2D faces enclosing a 3D volume) produces this match between the simplex topology and the observed polarisation count.</p>
                 </div>
             </div>
 
@@ -220,14 +220,14 @@
             </div>
 
             <!-- ============================================================
-                 BLOCK 10: THE COVARIANT COMPLETION
+                 BLOCK 10: THE GFD ACTION
                  ============================================================ -->
 
-            <h2>The Covariant Completion</h2>
+            <h2>The GFD Action</h2>
 
             <p>A gravitational constant alone does not make predictions. To compute the rotation curve of a galaxy, or the trajectory of a spacecraft, or the bending of light around a star, we need an action: a single mathematical object from which all the equations of motion, conservation laws, and observable predictions follow. The coupling hierarchy of the dual tetrad topology provides exactly this.</p>
 
-            <p>The covariant completion is a scalar-tensor action that encodes the full three-level coupling structure of the gravity field into four terms:</p>
+            <p>The GFD action is a scalar-tensor action that encodes the full three-level coupling structure of the gravity field into four terms:</p>
 
             <div class="eq">S<sub>ST</sub> = &int; d<sup>4</sup>x &radic;(&minus;g) [ R/(16&pi;G) &minus; a<sub>0</sub><sup>2</sup>/(8&pi;G) F(|&nabla;&Phi;|<sup>2</sup>/a<sub>0</sub><sup>2</sup>) &minus; &frac14; e<sup>&minus;2&Phi;/c<sup>2</sup></sup> F<sub>&mu;&nu;</sub>F<sup>&mu;&nu;</sup> + L<sub>matter</sub> ]</div>
 
