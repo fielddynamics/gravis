@@ -3342,13 +3342,15 @@ function initObsTabs() {
             var theoryToggles    = document.getElementById('theory-toggles');
             var chartContainer   = document.querySelector('.chart-container');
             var obsFace          = document.getElementById('obs-data-face');
+            var chartDataFace    = document.getElementById('chart-data-face');
             var fieldFace        = document.getElementById('field-analysis-face');
-            var rightPanel       = document.querySelector('.right-panel');
+            var rightPanel      = document.querySelector('.right-panel');
 
             // Default: hide all content panels
             if (theoryToggles)  theoryToggles.style.display  = 'none';
             if (chartContainer) chartContainer.style.display = 'none';
             if (obsFace)        obsFace.style.display        = 'none';
+            if (chartDataFace)  chartDataFace.style.display   = 'none';
             if (fieldFace)      fieldFace.style.display      = 'none';
             if (rightPanel) rightPanel.classList.remove('obs-data-active');
 
@@ -3358,6 +3360,10 @@ function initObsTabs() {
             } else if (target === 'data') {
                 if (obsFace) obsFace.style.display = '';
                 if (rightPanel) rightPanel.classList.add('obs-data-active');
+            } else if (target === 'chart-data') {
+                if (chartDataFace) chartDataFace.style.display = '';
+                if (rightPanel) rightPanel.classList.add('obs-data-active');
+                renderChartDataTab();
             } else if (target === 'field-analysis') {
                 if (fieldFace) fieldFace.style.display = '';
                 if (rightPanel) rightPanel.classList.add('obs-data-active');
@@ -3471,11 +3477,13 @@ function hideObsTabs() {
     var theoryToggles  = document.getElementById('theory-toggles');
     var chartContainer = document.querySelector('.chart-container');
     var obsFace        = document.getElementById('obs-data-face');
+    var chartDataFace  = document.getElementById('chart-data-face');
     var fieldFace      = document.getElementById('field-analysis-face');
     var rightPanel     = document.querySelector('.right-panel');
     if (theoryToggles)  theoryToggles.style.display  = '';
     if (chartContainer) chartContainer.style.display = '';
     if (obsFace)        obsFace.style.display        = 'none';
+    if (chartDataFace)  chartDataFace.style.display  = 'none';
     if (fieldFace)      fieldFace.style.display      = 'none';
     if (rightPanel)     rightPanel.classList.remove('obs-data-active');
 
@@ -3489,6 +3497,255 @@ function hideObsTabs() {
             t.classList.toggle('active', t.getAttribute('data-tab') === 'chart');
         });
     }
+}
+
+// =====================================================================
+// CHART DATA TAB (all data used to render the chart, exportable)
+// =====================================================================
+
+/** Build CSV string from rows and headers. */
+function tableToCSV(headers, rows) {
+    var lines = [headers.join(',')];
+    rows.forEach(function(row) {
+        lines.push(row.map(function(cell) { return String(cell); }).join(','));
+    });
+    return lines.join('\n');
+}
+
+/** Build full chart data payload for JSON export. */
+function chartDataToJSON() {
+    var out = { metadata: {}, mass_model: null, observational_data: [], series: {} };
+    var example = currentExample || pinnedGalaxyExample;
+    var galaxyName = example ? example.name.replace(/\s*\(.*\)/, '') : 'Galaxy';
+    out.metadata.galaxy = galaxyName;
+    out.metadata.R_HI_kpc = (sandboxResult && sandboxResult.sparc_r_hi_kpc != null) ? sandboxResult.sparc_r_hi_kpc : null;
+    out.metadata.mass_model_source = (sandboxResult && sandboxResult.gfd_source === 'manual') ? 'Manual' : 'Photometric';
+    var pm = sandboxResult && sandboxResult.photometric_mass_model;
+    if (pm) {
+        var gasM = pm.gas ? pm.gas.M : 0, gasRd = pm.gas ? pm.gas.Rd : 0;
+        var diskM = pm.disk ? pm.disk.M : 0, diskRd = pm.disk ? pm.disk.Rd : 0;
+        var bulgeM = pm.bulge ? pm.bulge.M : 0, bulgeA = pm.bulge ? pm.bulge.a : 0;
+        out.metadata.total_baryonic_M_sun = gasM + diskM + bulgeM;
+        out.mass_model = { gas: { M: gasM, Rd_kpc: gasRd }, disk: { M: diskM, Rd_kpc: diskRd }, bulge: { M: bulgeM, a_kpc: bulgeA } };
+    }
+    if (pinnedObservations && pinnedObservations.length > 0) {
+        out.observational_data = pinnedObservations.map(function(o) {
+            return { r_kpc: Math.round(o.r * 100) / 100, v_km_s: Math.round((o.v || 0) * 100) / 100, err_km_s: (o.err != null) ? Math.round(o.err * 100) / 100 : null };
+        });
+    }
+    var seriesIndices = [0, 1, 2, 3, 7, 11];
+    var seriesKeys = ['newtonian', 'gfd_photometric', 'mond', 'observed', 'cdm', 'gfd_observed'];
+    if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
+        for (var s = 0; s < seriesIndices.length; s++) {
+            var idx = seriesIndices[s];
+            var key = seriesKeys[s];
+            var ds = chart.data.datasets[idx];
+            if (!ds || !ds.data || ds.data.length === 0) continue;
+            var rows = [];
+            for (var i = 0; i < ds.data.length; i++) {
+                var pt = ds.data[i];
+                var r = (pt.x != null) ? Math.round(pt.x * 100) / 100 : null;
+                var v = (pt.y != null) ? Math.round(pt.y * 100) / 100 : null;
+                var err = (pt.err != null) ? Math.round(pt.err * 100) / 100 : (ds.errorBars && ds.errorBars[i] != null) ? Math.round(ds.errorBars[i] * 100) / 100 : null;
+                if (key === 'observed' && (err != null || pt.err != null)) rows.push({ r_kpc: r, v_km_s: v, err_km_s: err });
+                else rows.push({ r_kpc: r, v_km_s: v });
+            }
+            out.series[key] = rows;
+        }
+    }
+    return out;
+}
+
+/** Copy table CSV to clipboard; el is the container that holds a table, or a data-table id. */
+function copyTableCSV(el) {
+    var table = typeof el === 'string' ? document.getElementById(el) : el;
+    if (!table) return;
+    table = table.tagName === 'TABLE' ? table : table.querySelector('table');
+    if (!table || !table.tHead || !table.tBodies.length) return;
+    var headers = [];
+    table.tHead.querySelectorAll('th').forEach(function(th) { headers.push(th.textContent.trim()); });
+    var rows = [];
+    table.tBodies[0].querySelectorAll('tr').forEach(function(tr) {
+        var row = [];
+        tr.querySelectorAll('td').forEach(function(td) { row.push(td.textContent.trim()); });
+        rows.push(row);
+    });
+    var csv = tableToCSV(headers, rows);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(csv).then(function() { /* done */ }).catch(function() {});
+    }
+}
+
+/** Download CSV with given filename. */
+function downloadCSV(csv, filename) {
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename || 'chart-data.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+/** Download full chart data as JSON. */
+function downloadChartDataJSON() {
+    var json = chartDataToJSON();
+    var str = JSON.stringify(json, null, 2);
+    var blob = new Blob([str], { type: 'application/json' });
+    var a = document.createElement('a');
+    var galaxy = (json.metadata && json.metadata.galaxy) ? json.metadata.galaxy.replace(/\s+/g, '_') : 'galaxy';
+    a.href = URL.createObjectURL(blob);
+    a.download = galaxy + '_chart_data.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+/** Toggle collapsible section. */
+function toggleChartDataSection(headerEl) {
+    var section = headerEl.closest('.chart-data-section');
+    if (section) section.classList.toggle('chart-data-section-collapsed');
+}
+
+/**
+ * Populate the Chart Data tab with metadata, mass model, observational data,
+ * and one table per plot series (Observed, GFD Photometric, Newtonian, MOND, CDM, GFD Observed).
+ * Lazy-called when the user switches to the Chart Data tab.
+ */
+function renderChartDataTab() {
+    var container = document.getElementById('chart-data-content');
+    if (!container) return;
+
+    var example = currentExample || pinnedGalaxyExample;
+    var galaxyName = example ? example.name.replace(/\s*\(.*\)/, '') : 'Galaxy';
+    var pm = sandboxResult && sandboxResult.photometric_mass_model;
+    var hasObs = pinnedObservations && pinnedObservations.length > 0;
+
+    if (!example && !sandboxResult && (typeof chart === 'undefined' || !chart)) {
+        container.innerHTML = '<p class="chart-data-empty">Load a galaxy to see chart data.</p>';
+        return;
+    }
+
+    var html = '';
+
+    // Global export
+    html += '<div class="chart-data-toolbar">';
+    html += '<button type="button" class="chart-data-export-btn" onclick="downloadChartDataJSON()">Download all as JSON</button>';
+    html += '</div>';
+
+    // Metadata (no export buttons; expanded by default)
+    html += '<div class="chart-data-section">';
+    html += '<div class="chart-data-section-header" onclick="toggleChartDataSection(this)"><span class="chart-data-header-title"><span class="chart-data-chevron">&#9660;</span> Metadata</span></div>';
+    html += '<div class="chart-data-section-body">';
+    html += '<table class="obs-data-table chart-data-kv"><tbody>';
+    html += '<tr><td>Galaxy</td><td>' + (galaxyName || '--') + '</td></tr>';
+    var rHi = (sandboxResult && sandboxResult.sparc_r_hi_kpc != null) ? Number(sandboxResult.sparc_r_hi_kpc).toFixed(2) + ' kpc' : '--';
+    html += '<tr><td>R_HI (kpc)</td><td>' + rHi + '</td></tr>';
+    var src = (sandboxResult && sandboxResult.gfd_source === 'manual') ? 'Manual' : 'Photometric';
+    html += '<tr><td>Mass model source</td><td>' + src + '</td></tr>';
+    if (pm) {
+        var totalM = (pm.gas ? pm.gas.M : 0) + (pm.disk ? pm.disk.M : 0) + (pm.bulge ? pm.bulge.M : 0);
+        html += '<tr><td>Total baryonic mass (M_sun)</td><td>' + totalM.toExponential(2) + '</td></tr>';
+    }
+    html += '</tbody></table></div></div>';
+
+    // Mass model (expanded by default; buttons in header when model exists)
+    html += '<div class="chart-data-section">';
+    html += '<div class="chart-data-section-header" onclick="toggleChartDataSection(this)"><span class="chart-data-header-title"><span class="chart-data-chevron">&#9660;</span> Mass model</span>';
+    if (pm) {
+        html += '<span class="chart-data-header-actions" onclick="event.stopPropagation()">';
+        html += '<button type="button" class="chart-data-export-btn" onclick="copyTableCSV(document.getElementById(\'chart-data-table-mass\'))">Copy CSV</button>';
+        html += '<button type="button" class="chart-data-export-btn" onclick="var t=document.getElementById(\'chart-data-table-mass\');if(t){var h=[],r=[];t.tHead.querySelectorAll(\'th\').forEach(function(x){h.push(x.textContent);});t.tBodies[0].querySelectorAll(\'tr\').forEach(function(tr){var row=[];tr.querySelectorAll(\'td\').forEach(function(td){row.push(td.textContent);});r.push(row);});downloadCSV(tableToCSV(h,r),\'mass_model.csv\');}">Download CSV</button>';
+        html += '</span>';
+    }
+    html += '</div>';
+    html += '<div class="chart-data-section-body">';
+    if (pm) {
+        var gasM = pm.gas ? pm.gas.M : 0, gasRd = pm.gas ? pm.gas.Rd : 0;
+        var diskM = pm.disk ? pm.disk.M : 0, diskRd = pm.disk ? pm.disk.Rd : 0;
+        var bulgeM = pm.bulge ? pm.bulge.M : 0, bulgeA = pm.bulge ? pm.bulge.a : 0;
+        var totalMass = gasM + diskM + bulgeM;
+        html += '<table class="obs-data-table" id="chart-data-table-mass">';
+        html += '<thead><tr><th>Component</th><th>M (M_sun)</th><th>Scale (kpc)</th></tr></thead><tbody>';
+        html += '<tr><td>Gas disk</td><td>' + gasM.toExponential(2) + '</td><td>R_d = ' + gasRd.toFixed(2) + '</td></tr>';
+        html += '<tr><td>Stellar disk</td><td>' + diskM.toExponential(2) + '</td><td>R_d = ' + diskRd.toFixed(2) + '</td></tr>';
+        html += '<tr><td>Bulge</td><td>' + bulgeM.toExponential(2) + '</td><td>a = ' + bulgeA.toFixed(2) + '</td></tr>';
+        html += '<tr><td><strong>Total</strong></td><td><strong>' + totalMass.toExponential(2) + '</strong></td><td></td></tr>';
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="chart-data-empty">No mass model loaded.</p>';
+    }
+    html += '</div></div>';
+
+    // Observational data (collapsed by default; buttons in header when data exists)
+    html += '<div class="chart-data-section chart-data-section-collapsed">';
+    html += '<div class="chart-data-section-header" onclick="toggleChartDataSection(this)"><span class="chart-data-header-title"><span class="chart-data-chevron">&#9660;</span> Observational data</span>';
+    if (hasObs) {
+        html += '<span class="chart-data-header-actions" onclick="event.stopPropagation()">';
+        html += '<button type="button" class="chart-data-export-btn" onclick="copyTableCSV(document.getElementById(\'chart-data-table-obs\'))">Copy CSV</button>';
+        html += '<button type="button" class="chart-data-export-btn" onclick="var t=document.getElementById(\'chart-data-table-obs\');if(t){var h=[],r=[];t.tHead.querySelectorAll(\'th\').forEach(function(x){h.push(x.textContent);});t.tBodies[0].querySelectorAll(\'tr\').forEach(function(tr){var row=[];tr.querySelectorAll(\'td\').forEach(function(td){row.push(td.textContent);});r.push(row);});downloadCSV(tableToCSV(h,r),\'observations.csv\');}">Download CSV</button>';
+        html += '</span>';
+    }
+    html += '</div>';
+    html += '<div class="chart-data-section-body">';
+    if (hasObs) {
+        html += '<table class="obs-data-table" id="chart-data-table-obs">';
+        html += '<thead><tr><th>r (kpc)</th><th>v (km/s)</th><th>err (km/s)</th></tr></thead><tbody>';
+        for (var o = 0; o < pinnedObservations.length; o++) {
+            var ob = pinnedObservations[o];
+            var errStr = (ob.err != null) ? ob.err.toFixed(2) : '--';
+            html += '<tr><td>' + ob.r.toFixed(2) + '</td><td>' + (ob.v != null ? ob.v.toFixed(2) : '--') + '</td><td>' + errStr + '</td></tr>';
+        }
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="chart-data-empty">No observations.</p>';
+    }
+    html += '</div></div>';
+
+    // Plot series (one subsection per badge series with data)
+    var seriesConfig = [
+        { idx: 3, id: 'observed', filename: 'observed.csv' },
+        { idx: 1, id: 'gfd-photometric', filename: 'gfd_photometric.csv' },
+        { idx: 0, id: 'newtonian', filename: 'newtonian.csv' },
+        { idx: 2, id: 'mond', filename: 'mond.csv' },
+        { idx: 7, id: 'cdm', filename: 'cdm.csv' },
+        { idx: 11, id: 'gfd-observed', filename: 'gfd_observed.csv' }
+    ];
+    if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
+        for (var sc = 0; sc < seriesConfig.length; sc++) {
+            var cfg = seriesConfig[sc];
+            var ds = chart.data.datasets[cfg.idx];
+            if (!ds || !ds.data || ds.data.length === 0) continue;
+            var label = (ds.label || 'Series ' + cfg.idx).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            var tableId = 'chart-data-table-' + cfg.id;
+            html += '<div class="chart-data-section chart-data-section-collapsed">';
+            html += '<div class="chart-data-section-header" onclick="toggleChartDataSection(this)"><span class="chart-data-header-title"><span class="chart-data-chevron">&#9660;</span> ' + label + '</span>';
+            html += '<span class="chart-data-header-actions" onclick="event.stopPropagation()">';
+            html += '<button type="button" class="chart-data-export-btn" onclick="copyTableCSV(document.getElementById(\'' + tableId + '\'))">Copy CSV</button>';
+            html += '<button type="button" class="chart-data-export-btn" onclick="var t=document.getElementById(\'' + tableId + '\');if(t){var h=[],r=[];t.tHead.querySelectorAll(\'th\').forEach(function(x){h.push(x.textContent);});t.tBodies[0].querySelectorAll(\'tr\').forEach(function(tr){var row=[];tr.querySelectorAll(\'td\').forEach(function(td){row.push(td.textContent);});r.push(row);});downloadCSV(tableToCSV(h,r),\'' + cfg.filename + '\');}">Download CSV</button>';
+            html += '</span></div>';
+            html += '<div class="chart-data-section-body">';
+            var hasErr = cfg.idx === 3;
+            html += '<table class="obs-data-table" id="' + tableId + '">';
+            if (hasErr) html += '<thead><tr><th>r (kpc)</th><th>v (km/s)</th><th>err (km/s)</th></tr></thead>';
+            else html += '<thead><tr><th>r (kpc)</th><th>v (km/s)</th></tr></thead>';
+            html += '<tbody>';
+            for (var i = 0; i < ds.data.length; i++) {
+                var pt = ds.data[i];
+                var rx = (pt.x != null) ? pt.x.toFixed(2) : '--';
+                var vy = (pt.y != null) ? pt.y.toFixed(2) : '--';
+                if (hasErr) {
+                    var errVal = (pt.err != null) ? pt.err : (ds.errorBars && ds.errorBars[i] != null) ? ds.errorBars[i] : null;
+                    var errStr = (errVal != null) ? errVal.toFixed(2) : '--';
+                    html += '<tr><td>' + rx + '</td><td>' + vy + '</td><td>' + errStr + '</td></tr>';
+                } else {
+                    html += '<tr><td>' + rx + '</td><td>' + vy + '</td></tr>';
+                }
+            }
+            html += '</tbody></table>';
+            html += '</div></div>';
+        }
+    }
+
+    container.innerHTML = html;
 }
 
 // =====================================================================

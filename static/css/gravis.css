@@ -2204,6 +2204,90 @@ input[type="range"]::-moz-range-thumb:hover {
 }
 
 /* ================================================================
+   CHART DATA TAB — exportable data for all chart series
+   Collapsible sections, Copy/Download CSV, Download all as JSON.
+   ================================================================ */
+.chart-data-toolbar {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #252525;
+}
+.chart-data-export-btn {
+    background: #2a2a2a;
+    color: #b0b0b0;
+    border: 1px solid #404040;
+    padding: 6px 12px;
+    font-size: 0.85em;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.chart-data-export-btn:hover {
+    background: #353535;
+    color: #e0e0e0;
+    border-color: #4da6ff;
+}
+.chart-data-section {
+    margin-bottom: 12px;
+    border: 1px solid #252525;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.chart-data-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: #1e1e1e;
+    color: #c0c0c0;
+    font-weight: 600;
+    font-size: 0.92em;
+    cursor: pointer;
+    user-select: none;
+}
+.chart-data-section-header:hover {
+    background: #252525;
+    color: #e0e0e0;
+}
+.chart-data-header-title {
+    display: flex;
+    align-items: center;
+}
+.chart-data-chevron {
+    display: inline-block;
+    margin-right: 8px;
+    transition: transform 0.2s ease;
+}
+.chart-data-section-collapsed .chart-data-chevron {
+    transform: rotate(-90deg);
+}
+.chart-data-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    cursor: default;
+}
+.chart-data-header-actions .chart-data-export-btn {
+    margin: 0;
+}
+.chart-data-section-body {
+    padding: 12px;
+    background: #181818;
+}
+.chart-data-section-collapsed .chart-data-section-body {
+    display: none;
+}
+.chart-data-empty {
+    color: #606060;
+    font-size: 0.9em;
+    margin: 0;
+}
+.chart-data-kv td:first-child {
+    color: #808080;
+    font-weight: 500;
+}
+
+/* ================================================================
    FIELD ANALYSIS TAB — engineering classification report
    Collapsible sections, prioritised layout, report typography.
    ================================================================ */

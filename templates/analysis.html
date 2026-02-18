@@ -254,6 +254,7 @@
                     <div class="obs-tab-bar" id="obs-tab-bar" style="display: none;">
                         <button class="obs-tab active" data-tab="chart">Chart</button>
                         <button class="obs-tab" data-tab="data">Observation Data</button>
+                        <button class="obs-tab" data-tab="chart-data">Chart Data</button>
                         <button class="obs-tab" data-tab="field-analysis" style="display: none;">Field Analysis</button>
                     </div>
 
@@ -317,6 +318,17 @@
                         </div>
                         <div class="obs-data-content" id="obs-data-content">
                             <!-- Populated dynamically by showObsTabs() -->
+                        </div>
+                    </div>
+
+                    <!-- Chart Data tab: all data used to render the chart (exportable) -->
+                    <div id="chart-data-face" class="obs-data-face" style="display: none;">
+                        <div class="obs-font-toolbar">
+                            <button class="obs-font-btn" data-dir="-1" title="Decrease font size">A&#8722;</button>
+                            <button class="obs-font-btn" data-dir="1" title="Increase font size">A+</button>
+                        </div>
+                        <div class="obs-data-content" id="chart-data-content">
+                            <!-- Populated dynamically by renderChartDataTab() -->
                         </div>
                     </div>
 
