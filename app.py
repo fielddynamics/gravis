@@ -24,6 +24,7 @@ from physics.services.valence import ValenceService
 from physics.services.a0_derivation import A0DerivationService
 from physics.services.nuclear_decay import NuclearDecayService
 from physics.services.architecture import ArchitectureService
+from physics.services.sandbox import InferenceSandboxService
 
 
 def create_registry():
@@ -37,6 +38,7 @@ def create_registry():
     registry.register(A0DerivationService())
     registry.register(NuclearDecayService())
     registry.register(ArchitectureService())
+    registry.register(InferenceSandboxService())
     return registry
 
 
@@ -61,13 +63,13 @@ def create_app():
     api = create_api_blueprint(registry)
     app.register_blueprint(api)
 
-    # Lightweight splash screen (loads instantly, no external scripts)
-    @app.route("/splash")
-    def splash():
+    # Root: splash screen, then redirect to /home after 3s (logo/dashboard link goes to /home to skip splash)
+    @app.route("/")
+    def root():
         return render_template("splash.html")
 
-    # Home dashboard (auto-populated from registry)
-    @app.route("/")
+    # Home dashboard (no splash; linked from nav logo and Home)
+    @app.route("/home")
     def home():
         return render_template(
             "home.html",
@@ -100,6 +102,11 @@ def create_app():
     def redshift():
         return render_template("redshift.html", active_page="redshift")
 
+    # Inference page (Bayesian GFD base fit)
+    @app.route("/inference")
+    def inference():
+        return render_template("inference.html", active_page="inference")
+
     # Architecture overview page
     @app.route("/architecture")
     def architecture():
@@ -121,4 +128,4 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True, host="127.0.0.1", port=5001)
+    app.run(debug=True, host="127.0.0.1", port=5000)

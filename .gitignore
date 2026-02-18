@@ -25,3 +25,9 @@ Thumbs.db
 .env
 venv/
 .venv/
+
+# Papers (internal notes, LaTeX, scripts; not part of the app)
+papers/
+
+# Docs (internal documentation; not part of the app)
+docs/

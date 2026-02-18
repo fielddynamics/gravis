@@ -1025,7 +1025,7 @@ body {
    ===================================================================== */
 
 .left-panel {
-    width: 380px;
+    width: 460px;
     background-color: #242424;
     padding: 20px;
     border-right: none;
@@ -1081,7 +1081,294 @@ body {
     padding: 20px;
     display: flex;
     flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
 }
+
+/* When showing observation data tab, the right panel scrolls like left/right panels */
+.right-panel.obs-data-active {
+    overflow-y: auto;
+}
+
+.right-panel.obs-data-active::-webkit-scrollbar {
+    width: 12px;
+}
+
+.right-panel.obs-data-active::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.right-panel.obs-data-active::-webkit-scrollbar-thumb {
+    background: #333333;
+    border-radius: 6px;
+    border: 2px solid #1a1a1a;
+}
+
+.right-panel.obs-data-active::-webkit-scrollbar-thumb:hover {
+    background: #444444;
+}
+
+/* =====================================================================
+   Right Metrics Panel
+   ===================================================================== */
+
+.metrics-resize-handle {
+    width: 4px;
+    height: 100%;
+    background: #404040;
+    cursor: col-resize;
+    z-index: 10;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.metrics-resize-handle:hover,
+.metrics-resize-handle.dragging {
+    background: #4da6ff;
+}
+
+.metrics-panel {
+    width: 280px;
+    min-width: 280px;
+    background-color: #242424;
+    padding: 14px 12px;
+    overflow: hidden;
+    flex-shrink: 0;
+    border-left: none;
+    position: relative;
+    transition: width 0.2s, min-width 0.2s, padding 0.2s;
+    display: flex;
+    flex-direction: column;
+}
+
+.metrics-panel.collapsed {
+    width: 20px !important;
+    min-width: 20px !important;
+    padding: 0;
+    overflow: hidden;
+}
+
+.metrics-panel.collapsed .metrics-section {
+    display: none;
+}
+
+.metrics-panel.collapsed .metrics-collapse-btn {
+    width: 20px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.metrics-panel.collapsed .metrics-collapse-icon {
+    transform: rotate(180deg);
+}
+
+.metrics-collapse-btn {
+    position: absolute;
+    top: 8px;
+    left: 4px;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #606060;
+    font-size: 0.6em;
+    border-radius: 3px;
+    transition: color 0.2s, background 0.2s;
+    z-index: 2;
+}
+
+.metrics-collapse-btn:hover {
+    color: #4da6ff;
+    background: #333;
+}
+
+.metrics-collapse-icon {
+    transition: transform 0.2s;
+}
+
+.metrics-panel::-webkit-scrollbar {
+    width: 8px;
+}
+.metrics-panel::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+.metrics-panel::-webkit-scrollbar-thumb {
+    background: #333333;
+    border-radius: 4px;
+}
+.metrics-panel {
+    scrollbar-width: thin;
+    scrollbar-color: #333333 #1a1a1a;
+}
+
+.metrics-section {
+    background-color: #2a2a2a;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+
+/* Split pane layout inside metrics panel */
+.metrics-pane {
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #333333 #1a1a1a;
+}
+
+.metrics-pane-top {
+    padding-top: 28px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #333333 #1a1a1a;
+}
+
+.metrics-pane-bottom {
+    flex: 1;
+    min-height: 0;
+    padding-top: 4px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #333333 #1a1a1a;
+}
+
+.metrics-pane-bottom .metrics-section:first-child {
+    margin-top: 0;
+}
+
+.metrics-pane-divider {
+    height: 5px;
+    background: #404040;
+    cursor: row-resize;
+    flex-shrink: 0;
+    margin: 4px 0;
+    border-radius: 3px;
+    transition: background 0.2s;
+}
+
+.metrics-pane-divider:hover,
+.metrics-pane-divider.dragging {
+    background: #4da6ff;
+}
+
+
+.metrics-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s;
+}
+
+.metrics-header:hover {
+    background-color: #333;
+}
+
+.metrics-header-text {
+    color: #b0b0b0;
+    font-size: 0.82em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metrics-chevron {
+    color: #606060;
+    font-size: 0.65em;
+    transition: transform 0.2s;
+}
+
+.metrics-body {
+    padding: 4px 12px 10px 12px;
+}
+
+.metrics-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 3px 0;
+    border-bottom: 1px solid #333;
+}
+
+.metrics-row:last-child {
+    border-bottom: none;
+}
+
+.metrics-label {
+    color: #808080;
+    font-size: 0.8em;
+}
+
+.metrics-value {
+    color: #e0e0e0;
+    font-size: 0.82em;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.metrics-value-sm {
+    font-size: 0.72em;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.metrics-value.good { color: #4caf50; }
+.metrics-value.warn { color: #ff9800; }
+.metrics-value.bad  { color: #ef5350; }
+
+/* Residuals table */
+.metrics-residuals-table-wrap {
+    max-height: 260px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #333333 #1a1a1a;
+}
+
+.metrics-residuals-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75em;
+    font-variant-numeric: tabular-nums;
+}
+
+.metrics-residuals-table thead th {
+    color: #808080;
+    font-weight: 600;
+    text-align: right;
+    padding: 3px 5px;
+    border-bottom: 1px solid #404040;
+    position: sticky;
+    top: 0;
+    background: #2a2a2a;
+}
+
+.metrics-residuals-table thead th:first-child {
+    text-align: left;
+}
+
+.metrics-residuals-table tbody td {
+    color: #b0b0b0;
+    text-align: right;
+    padding: 2px 5px;
+    border-bottom: 1px solid #2f2f2f;
+}
+
+.metrics-residuals-table tbody td:first-child {
+    text-align: left;
+}
+
+.metrics-residuals-table tbody tr.sigma-good td { color: #4caf50; }
+.metrics-residuals-table tbody tr.sigma-warn td { color: #ff9800; }
+.metrics-residuals-table tbody tr.sigma-bad td  { color: #ef5350; }
 
 h1 {
     font-size: 1.8em;
@@ -1291,35 +1578,87 @@ input[type="range"]::-moz-range-thumb:hover {
     overflow: hidden;
 }
 
+.chart-main-wrapper {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.vps-panel {
+    height: 250px;
+    flex-shrink: 0;
+    border-top: 1px solid #404040;
+    margin-top: 8px;
+    padding-top: 8px;
+    display: flex;
+    flex-direction: column;
+}
+
+.vps-panel-label {
+    font-size: 0.8em;
+    font-weight: 500;
+    color: #b0b0b0;
+    margin-bottom: 4px;
+}
+
+.vps-chart-wrap {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+.vps-chart-wrap canvas {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+}
+
 .chart-container canvas {
     max-height: 100%;
     max-width: 100%;
 }
 
-.reset-zoom-button {
+.chart-spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(255,255,255,0.1);
+    border-top-color: #4da6ff;
+    border-radius: 50%;
+    animation: chart-spin 0.8s linear infinite;
+    margin: 0 auto;
+}
+
+@keyframes chart-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Chart action button (Reset Zoom): floats top-left over the canvas,
+   styled like the former Data Sources button. Only visible when zoomed. */
+.chart-action-button {
     position: absolute;
-    top: 30px;
-    right: 30px;
-    padding: 6px 12px;
-    background-color: rgba(77, 166, 255, 0.2);
-    border: 1px solid rgba(77, 166, 255, 0.6);
-    border-radius: 4px;
+    top: 8px;
+    left: 8px;
+    background: rgba(77, 166, 255, 0.12);
     color: #4da6ff;
-    font-size: 0.85em;
+    border: 1px solid rgba(77, 166, 255, 0.3);
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 0.78em;
+    font-weight: 500;
+    letter-spacing: 0.3px;
     cursor: pointer;
-    transition: all 0.2s;
     z-index: 10;
-    backdrop-filter: blur(10px);
+    transition: background 0.15s, border-color 0.15s;
 }
 
-.reset-zoom-button:hover {
-    background-color: rgba(77, 166, 255, 0.3);
-    border-color: #4da6ff;
-    transform: scale(1.05);
+.chart-action-button:hover {
+    background: rgba(77, 166, 255, 0.25);
+    border-color: rgba(77, 166, 255, 0.6);
 }
 
-.reset-zoom-button:active {
-    transform: scale(0.95);
+@keyframes chart-spin {
+    to { transform: rotate(360deg); }
 }
 
 .info-text {
@@ -1369,6 +1708,76 @@ input[type="range"]::-moz-range-thumb:hover {
     color: #4da6ff;
 }
 
+/* Observations Panel */
+.observations-panel {
+    margin-bottom: 14px;
+    background-color: #2a2a2a;
+    border-radius: 8px;
+    border: 1px solid #404040;
+    overflow: hidden;
+}
+
+.observations-panel-header {
+    padding: 12px 15px 0 15px;
+}
+
+.observations-panel-label {
+    color: #b0b0b0;
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+.observations-panel-body {
+    padding: 8px 15px 12px 15px;
+}
+
+.observations-dropdown {
+    width: 100%;
+    background: #1e1e2e;
+    color: #e0e0e0;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.88em;
+    font-family: inherit;
+    cursor: pointer;
+    appearance: auto;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.observations-dropdown:hover,
+.observations-dropdown:focus {
+    border-color: #4da6ff;
+}
+
+.add-observation-btn {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    padding: 9px 14px;
+    background-color: transparent;
+    color: #4da6ff;
+    border: 1px solid #4da6ff;
+    border-radius: 6px;
+    cursor: not-allowed;
+    font-size: 0.85em;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    transition: background-color 0.2s, color 0.2s;
+    opacity: 0.55;
+}
+
+.add-observation-btn:not(:disabled) {
+    cursor: pointer;
+    opacity: 1;
+}
+
+.add-observation-btn:not(:disabled):hover {
+    background-color: #4da6ff;
+    color: #1a1a2e;
+}
+
 /* Mass Distribution Panel */
 .mass-model-section {
     margin-bottom: 14px;
@@ -1389,6 +1798,97 @@ input[type="range"]::-moz-range-thumb:hover {
     color: #b0b0b0;
     font-size: 0.9em;
     font-weight: 500;
+}
+
+.reset-to-photometric-btn {
+    padding: 4px 10px;
+    font-size: 0.78em;
+    font-weight: 500;
+    color: #4da6ff;
+    background: rgba(77, 166, 255, 0.12);
+    border: 1px solid rgba(77, 166, 255, 0.5);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.reset-to-photometric-btn:hover {
+    background: rgba(77, 166, 255, 0.2);
+    border-color: #4da6ff;
+}
+
+/* View Mode Toggle: segmented control for Mass Model vs Observations */
+.view-mode-toggle {
+    display: flex;
+    margin-bottom: 14px;
+    background: #2a2a2a;
+    border: 1px solid #404040;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.view-mode-btn {
+    flex: 1;
+    padding: 10px 12px;
+    background: transparent;
+    color: #808080;
+    border: none;
+    font-size: 0.85em;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    position: relative;
+}
+
+.view-mode-btn.active {
+    color: #e0e0e0;
+    background: rgba(77, 166, 255, 0.12);
+}
+
+.view-mode-btn[data-mode="observations"].active {
+    color: #00E5FF;
+    background: rgba(0, 229, 255, 0.12);
+}
+
+.view-mode-btn:not(.active):hover {
+    color: #b0b0b0;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.view-mode-btn.loading {
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+.view-mode-btn.loading::after {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-left: 6px;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: toggleSpin 0.6s linear infinite;
+    vertical-align: middle;
+}
+
+@keyframes toggleSpin {
+    to { transform: rotate(360deg); }
+}
+
+.command-btn {
+    background: transparent;
+    border: 1px solid #555;
+    color: #555;
+    font-size: 0.75em;
+    padding: 3px 8px;
+    border-radius: 3px;
+    margin-left: 8px;
+    cursor: not-allowed;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
 }
 
 .mass-model-content {
@@ -1522,145 +2022,346 @@ input[type="range"]::-moz-range-thumb:hover {
     flex-direction: column;
 }
 
-/* Button style used on both faces */
-.data-card-button {
-    background: rgba(77, 166, 255, 0.12);
-    color: #4da6ff;
-    border: 1px solid rgba(77, 166, 255, 0.3);
-    border-radius: 4px;
-    padding: 5px 12px;
-    font-size: 0.78em;
+/* Data card styles removed: Data Sources is now in the Observation Data tab */
+
+/* ================================================================
+   OBSERVATION DATA TAB BAR + DATA PANEL
+   Appears in observation mode above the chart container.
+   ================================================================ */
+.obs-tab-bar {
+    display: flex;
+    gap: 0;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+    padding: 0 12px;
+    flex-shrink: 0;
+    /* Bleed to panel edges (right-panel has 20px padding) */
+    margin: -20px -20px 12px -20px;
+}
+
+.obs-tab {
+    padding: 12px 16px;
+    background: transparent;
+    color: #808080;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 0.85em;
     font-weight: 500;
     letter-spacing: 0.3px;
     cursor: pointer;
-    z-index: 10;
-    align-self: flex-start;
-}
-/* On chart face the button floats over the canvas */
-#chart-face .data-card-button {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-}
-/* On data face the button sits in the flow */
-#data-face .data-card-button {
-    position: static;
-    flex-shrink: 0;
-}
-.data-card-button:hover {
-    background: rgba(77, 166, 255, 0.25);
-    border-color: rgba(77, 166, 255, 0.6);
+    transition: color 0.15s, border-color 0.15s;
 }
 
-/* Visible scrollable content box below the button */
-.data-card-body {
-    margin: 16px 0 0 0;
-    padding: 20px 24px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    color: #c0c0c0;
-    font-size: 0.85em;
-    line-height: 1.6;
-    height: calc(100% - 60px);
-    background: #1a1a1a;
+.obs-tab:hover {
+    color: #b0b0b0;
+}
+
+.obs-tab.active {
+    color: #00E5FF;
+    border-bottom-color: #00E5FF;
+}
+
+/* Observation Data tab: markdown-preview style.
+   No inner scroll; the right-panel itself scrolls when this overflows. */
+.obs-data-face {
+    /* Do NOT set flex:1/min-height:0/overflow here.
+       The content flows naturally; the right-panel scrolls. */
+    position: relative;
+}
+
+/* Font size toolbar (A- / A+) in data and field analysis tabs */
+.obs-font-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    padding: 8px 8px 4px 0;
+}
+
+.obs-font-btn {
+    background: #1e1e1e;
     border: 1px solid #333;
-    border-radius: 6px;
-    scrollbar-width: thin;
-    scrollbar-color: #333333 #1a1a1a;
-}
-
-/* Scrollbar matching left pane */
-.data-card-body::-webkit-scrollbar { width: 12px; }
-.data-card-body::-webkit-scrollbar-track { background: #1a1a1a; }
-.data-card-body::-webkit-scrollbar-thumb { background: #333333; border-radius: 6px; }
-.data-card-body::-webkit-scrollbar-thumb:hover { background: #444444; }
-
-.dc-title {
-    font-size: 16px;
-    font-weight: 500;
-    color: #e0e0e0;
-    margin: 0 0 6px;
-    letter-spacing: 0.3px;
-}
-
-.data-card-body h3 {
-    color: #4da6ff;
+    border-radius: 4px;
+    color: #808080;
     font-size: 0.82em;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    margin: 18px 0 8px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid #333;
-}
-.data-card-body h3:first-of-type { margin-top: 8px; }
-
-.dc-section {
-    margin-bottom: 6px;
-    color: #a0a0a0;
-    font-size: 0.95em;
+    width: 28px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+    user-select: none;
 }
 
-.dc-table {
+.obs-font-btn:hover {
+    background: #2a2a2a;
+    border-color: #4da6ff;
+    color: #e0e0e0;
+}
+
+.obs-data-content {
+    /* 8px + 20px right-panel padding = 28px, aligned with tab text */
+    padding: 20px 8px 40px 8px;
+    color: #d0d0d0;
+    font-size: 0.9em;
+    line-height: 1.75;
+}
+
+.obs-data-content h2 {
+    font-size: 1.15em;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin: 0 0 4px 0;
+}
+
+.obs-data-content .obs-summary {
+    color: #808080;
+    font-size: 0.88em;
+    margin-bottom: 28px;
+}
+
+/* Source group: heading + table per data source */
+.obs-source-group {
+    margin-bottom: 28px;
+}
+
+.obs-source-group h3 {
+    font-size: 0.92em;
+    font-weight: 600;
+    color: #00E5FF;
+    margin: 0 0 2px 0;
+}
+
+.obs-source-group .obs-source-meta {
+    color: #606060;
+    font-size: 0.82em;
+    margin-bottom: 10px;
+}
+
+/* Observation table within each source group */
+.obs-data-table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 6px;
-    font-size: 0.92em;
+    font-size: 0.88em;
+    margin-bottom: 0;
 }
-.dc-table th {
-    text-align: left;
-    color: #666;
-    font-weight: 500;
-    font-size: 0.82em;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 5px 10px;
-    border-bottom: 1px solid #333;
-}
-.dc-table td {
-    padding: 4px 10px;
-    border-bottom: 1px solid #2a2a2a;
-    color: #c0c0c0;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 0.93em;
-}
-.dc-table tr:last-child td { border-bottom: none; }
 
-.dc-total {
+.obs-data-table th {
     text-align: right;
-    padding: 5px 10px;
+    padding: 6px 12px;
+    color: #606060;
+    font-weight: 500;
+    border-bottom: 1px solid #333;
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+.obs-data-table th:first-child {
+    text-align: left;
+}
+
+.obs-data-table td {
+    text-align: right;
+    padding: 5px 12px;
+    color: #c0c0c0;
+    border-bottom: 1px solid #2a2a2a;
+    font-variant-numeric: tabular-nums;
+}
+
+.obs-data-table td:first-child {
+    text-align: left;
+    color: #4da6ff;
+}
+
+.obs-data-table tbody tr:hover {
+    background: rgba(77, 166, 255, 0.05);
+}
+
+/* References section at bottom */
+.obs-data-content .obs-refs-section {
+    margin-top: 28px;
+    padding-top: 16px;
+    border-top: 1px solid #2a2a2a;
+}
+
+.obs-data-content .obs-refs-section h4 {
+    color: #808080;
+    font-size: 0.85em;
+    font-weight: 500;
+    margin: 0 0 8px 0;
+}
+
+.obs-data-content .obs-refs-section div {
+    color: #505050;
+    font-size: 0.8em;
+    line-height: 1.8;
+    padding-left: 12px;
+}
+
+/* ================================================================
+   FIELD ANALYSIS TAB — engineering classification report
+   Collapsible sections, prioritised layout, report typography.
+   ================================================================ */
+
+/* Loading placeholder */
+.fa-loading { color: #606060; font-size: 0.88em; }
+
+/* --- Report Header --- */
+.fa-report-header {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #252525;
+}
+.fa-report-id {
+    font-size: 0.68em;
     font-weight: 600;
     color: #4da6ff;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 0.9em;
-    border-top: 1px solid #333;
+    letter-spacing: 1.5px;
+    margin-bottom: 4px;
 }
-
-.dc-references {
-    list-style: none;
-    padding: 0;
+.fa-report-name {
+    font-size: 1.3em;
+    font-weight: 700;
+    color: #e8e8e8;
     margin: 0;
-}
-.dc-references li {
-    padding: 3px 0;
-    color: #999;
-    font-size: 0.9em;
-}
-.dc-references li::before {
-    content: "\2022";
-    color: #4da6ff;
-    margin-right: 8px;
+    letter-spacing: 0.2px;
 }
 
-.dc-methodology {
-    margin-top: 14px;
-    padding: 10px 14px;
-    background: rgba(77, 166, 255, 0.05);
-    border-left: 3px solid rgba(77, 166, 255, 0.25);
-    border-radius: 0 4px 4px 0;
-    color: #999;
+/* --- Collapsible Section --- */
+.fa-section {
+    margin-bottom: 4px;
+    border: 1px solid #1e1e1e;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.fa-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    user-select: none;
+    background: #161616;
+    transition: background 0.12s;
+}
+.fa-section-header:hover { background: #1a1a1a; }
+
+.fa-section-header h3 {
+    font-size: 0.78em;
+    font-weight: 600;
+    color: #a0a0a0;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+.fa-collapsed .fa-section-header h3 { color: #606060; }
+
+.fa-chevron {
+    font-size: 0.65em;
+    color: #505050;
+    width: 10px;
+    flex-shrink: 0;
+    transition: color 0.12s;
+}
+.fa-section-header:hover .fa-chevron { color: #808080; }
+
+.fa-section-body {
+    padding: 12px 14px 16px 14px;
+}
+
+/* --- Prose --- */
+.fa-prose {
+    font-size: 0.84em;
+    color: #858585;
+    margin: 4px 0 6px 0;
+    line-height: 1.55;
+}
+
+/* --- Block equation --- */
+.fa-eq {
+    margin: 6px 0 12px 10px;
+    padding: 6px 0 6px 14px;
+    border-left: 2px solid #252525;
+    overflow-x: auto;
+    min-height: 1.2em;
+}
+.fa-eq .katex {
+    color: #d0d0d0;
+    font-size: 1.05em;
+}
+
+/* --- Step labels (numbered items in Fitted Model / Theory) --- */
+.fa-step-label {
+    font-size: 0.8em;
+    font-weight: 600;
+    color: #4da6ff;
+    margin: 16px 0 2px 0;
+    letter-spacing: 0.15px;
+}
+.fa-step-label:first-child { margin-top: 4px; }
+.fa-step-note {
+    font-weight: 400;
+    color: #555;
+    font-size: 0.92em;
+}
+
+/* Constants block at bottom of Fitted Model */
+.fa-constants-block {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #1e1e1e;
+}
+.fa-constants-block .fa-eq {
+    border-left-color: #1e1e1e;
+    margin-bottom: 6px;
+}
+.fa-constants-block .fa-eq .katex {
     font-size: 0.88em;
-    line-height: 1.5;
+    color: #707070;
+}
+
+/* --- Metrics table --- */
+.fa-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.84em;
+}
+
+.fa-table td {
+    padding: 5px 6px;
+    vertical-align: middle;
+}
+
+.fa-table tr { border-bottom: 1px solid #1a1a1a; }
+.fa-table tr:last-child { border-bottom: none; }
+.fa-table tr:hover { background: rgba(255,255,255,0.02); }
+
+.fa-table td.fa-label {
+    color: #858585;
+    width: 46%;
+}
+
+.fa-table td.fa-sym-cell {
+    width: 12%;
+    text-align: center;
+}
+.fa-table td.fa-sym-cell .katex {
+    font-size: 0.88em;
+    color: #606060;
+}
+
+.fa-table td.fa-value {
+    color: #d0d0d0;
+    text-align: right;
+    font-family: 'Consolas', 'SF Mono', 'Menlo', monospace;
+    font-size: 0.95em;
+    white-space: nowrap;
 }
 
 /* ================================================================

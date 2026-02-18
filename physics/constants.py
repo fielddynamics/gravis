@@ -31,6 +31,26 @@ K_SIMPLEX = 4
 # a0 = k^2 * G * m_e / r_e^2
 A0 = K_SIMPLEX * K_SIMPLEX * G * M_E / (R_E * R_E)
 
+# Coupling polynomial f(k) at k = K_SIMPLEX = 4
+# f(k) = 1 + k + k^2 = 1 + 4 + 16 = 21
+# Full coupling strength of the stellated octahedron topology.
+FK = 1 + K_SIMPLEX + K_SIMPLEX * K_SIMPLEX  # 21
+
+# Throat yN threshold: (4/13)(9/10) = 18/65
+# Structural fraction (4/13) times throughput factor (9/10).
+THROAT_YN = (4.0 / 13.0) * (9.0 / 10.0)  # 0.27692...
+
+# Horizon yN threshold: (18/65)(2/21) = 36/1365
+# Throat condition divided by f(k)/2. The horizon is where the
+# Newtonian acceleration has dropped to 2/f(k) of its throat value.
+HORIZON_YN = 2.0 * THROAT_YN / FK  # 0.026374...
+
+# Acceleration ratio between horizon and throat: 2/f(k)
+HORIZON_THROAT_ACCEL_RATIO = 2.0 / FK  # 0.095238...
+
+# Throat fraction: R_t / R_env (emerges from the two yN thresholds)
+THROAT_FRAC = 0.30
+
 
 def verify_a0():
     """Verify a0 is approximately 1.2e-10 m/s^2."""

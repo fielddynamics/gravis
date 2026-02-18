@@ -21,6 +21,10 @@ const FAQ_DATA = [
             {
                 q: "Is the source code available?",
                 a: "<p>Yes. The full source code, including the physics engine, API, and test suite, is available at <strong>github.com/fielddynamics/gravis</strong>.</p>"
+            },
+            {
+                q: "What license is GRAVIS under?",
+                a: "<p>GRAVIS is <strong>Copyright (C) 2026 Stephen Nelson / Field Dynamics</strong>. It is licensed under the <strong>GNU Affero General Public License v3.0</strong> (AGPL-3.0). You may use, modify, and redistribute the software under the terms of the AGPL-3.0. Any modified version that is deployed as a network service must also be released under AGPL-3.0 with full source code available to its users.</p><p>The mathematical equations and physical constants implemented in this software (including the GFD field equation, the Lagrangian, and the topological acceleration scale a<sub>0</sub>) are scientific results and are not subject to copyright restriction. Independent reimplementation of the physics is permitted and encouraged.</p>"
             }
         ]
     },

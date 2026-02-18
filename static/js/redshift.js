@@ -798,7 +798,6 @@ function loadObservedData() {
                 ];
             }
 
-            document.getElementById('data-card-btn').style.display = 'block';
             tfChart.update('none');
         });
 }

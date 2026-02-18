@@ -6,7 +6,9 @@ analysis. This service wraps the existing GravisEngine pipeline and
 owns all rotation-specific API endpoints under /api/rotation/*.
 
 Endpoints:
-    POST /api/rotation/curve           - compute rotation curves
+    POST /api/rotation/curve           - compute rotation curves (prediction)
+    POST /api/rotation/inference       - compute rotation curves (optimized)
+    POST /api/rotation/infer-curve     - (legacy alias for /inference)
     POST /api/rotation/infer-mass      - single-point mass inference
     POST /api/rotation/infer-mass-model - infer scaled mass model
     POST /api/rotation/infer-mass-multi - multi-point inference
@@ -21,7 +23,10 @@ import math
 from flask import jsonify, request
 
 from physics.services import GravisService
-from physics.engine import GravisConfig, GravisEngine, auto_vortex_strength
+from physics.engine import GravisConfig, GravisEngine, compute_fit_metrics
+from physics.sigma import auto_vortex_strength
+from physics.services.rotation.inference import optimize_inference, solve_field_geometry
+from physics.services.rotation.field_analysis import compute_field_analysis
 from physics import constants
 from physics.mass_model import enclosed_mass, total_mass
 from physics.inference import infer_mass
@@ -68,13 +73,8 @@ class RotationService(GravisService):
             "vortex_strength": config.get("vortex_strength"),
         }
 
-    def compute(self, config):
-        """Compute rotation curves via the GravisEngine pipeline."""
-        mass_model = config["mass_model"]
-        accel_ratio = config["accel_ratio"]
-        observations = config.get("observations")
-
-        # Determine NFW halo mass
+    def _cdm_halo(self, mass_model, observations, accel_ratio):
+        """Compute CDM halo info from observations or abundance matching."""
         m_total = total_mass(mass_model)
 
         def mass_at_r(r):
@@ -103,16 +103,45 @@ class RotationService(GravisService):
                 'method': 'abundance matching (Moster+ 2013)',
             }
 
-        # Compute auto Origin Throughput from gas leverage
-        gr = config.get("galactic_radius")
-        auto_ot = auto_vortex_strength(mass_model, float(gr)) if gr else 0.0
+        if cdm_halo_info:
+            cdm_halo_info['m200'] = round(cdm_halo_info['m200'], 2)
+        return m200, cdm_halo_info
 
-        # Use auto value when no explicit override was sent
+    @staticmethod
+    def _field_geometry(mass_model, accel_ratio):
+        """Compute field geometry from mass model via topological yN
+        conditions.  No observations or galactic_radius needed."""
+        b = mass_model.get("bulge", {})
+        d = mass_model.get("disk", {})
+        g = mass_model.get("gas", {})
+        a0_eff = constants.A0 * accel_ratio
+        return solve_field_geometry(
+            b.get("M", 0), b.get("a", 0),
+            d.get("M", 0), d.get("Rd", 0),
+            g.get("M", 0), g.get("Rd", 0),
+            a0_eff,
+        )
+
+    def compute(self, config):
+        """Compute rotation curves (prediction mode, no GA)."""
+        mass_model = config["mass_model"]
+        accel_ratio = config["accel_ratio"]
+        observations = config.get("observations")
+
+        m200, cdm_halo_info = self._cdm_halo(
+            mass_model, observations, accel_ratio)
+
+        # Compute theoretical Origin Throughput from gas leverage
+        gr = config.get("galactic_radius")
+        theoretical_ot = (
+            auto_vortex_strength(mass_model, float(gr)) if gr else 0.0
+        )
+
+        # Use explicit override or theoretical prediction (never GA)
         vortex_val = config.get("vortex_strength")
         if vortex_val is None:
-            vortex_val = auto_ot
+            vortex_val = theoretical_ot
 
-        # Run engine pipeline
         engine_config = GravisConfig(
             mass_model=mass_model,
             max_radius=config["max_radius"],
@@ -125,14 +154,116 @@ class RotationService(GravisService):
         result = engine.run()
 
         response = result.to_api_response()
-
-        # Always return the auto-calculated throughput so the frontend
-        # can display and sync the slider.
-        response["auto_origin_throughput"] = auto_ot
-
-        if cdm_halo_info:
-            cdm_halo_info['m200'] = round(cdm_halo_info['m200'], 2)
+        response["auto_origin_throughput"] = vortex_val
+        response["theoretical_origin_throughput"] = theoretical_ot
         response["cdm_halo"] = cdm_halo_info
+
+        # Field geometry: always compute from mass model via topological
+        # yN conditions. No observations or galactic_radius needed.
+        response["field_geometry"] = self._field_geometry(
+            mass_model, accel_ratio)
+
+        # Fit quality metrics (always computed when observations exist)
+        response["metrics"] = compute_fit_metrics(
+            [float(r) for r in result.radii],
+            [float(v) for v in result.series("gfd")],
+            observations,
+            engine_config,
+        )
+
+        return response
+
+    def compute_infer(self, config):
+        """Compute rotation curves with inference optimization.
+
+        Stage 1: Accept published mass model as baseline.
+        Stage 2: Grid search finds throughput for best GFD-sigma fit.
+        Stage 3: Mass decomposition refines stellar masses.
+        """
+        mass_model = config["mass_model"]
+        accel_ratio = config["accel_ratio"]
+        observations = config.get("observations")
+        gr = config.get("galactic_radius")
+
+        theoretical_ot = (
+            auto_vortex_strength(mass_model, float(gr)) if gr else 0.0
+        )
+
+
+        vortex_val = config.get("vortex_strength")
+        infer_result = None
+        run_mass_model = mass_model
+
+        # After inference, use the derived R_env for the engine so the
+        # displayed sigma curve and grid are consistent with the optimizer.
+        engine_gr = gr
+        if vortex_val is None:
+            if observations and len(observations) >= 3:
+                infer_result = optimize_inference(
+                    mass_model,
+                    config["max_radius"],
+                    config["num_points"],
+                    observations,
+                    accel_ratio,
+                    float(gr) if gr else 0.0,
+                )
+                vortex_val = infer_result["throughput"]
+                run_mass_model = infer_result["mass_model"]
+                # Use the topologically derived R_env for the engine
+                fg = infer_result.get("field_geometry", {})
+                if fg and fg.get("envelope_radius_kpc"):
+                    engine_gr = fg["envelope_radius_kpc"]
+            else:
+                vortex_val = theoretical_ot
+
+        m200, cdm_halo_info = self._cdm_halo(
+            run_mass_model, observations, accel_ratio)
+
+        engine_config = GravisConfig(
+            mass_model=run_mass_model,
+            max_radius=config["max_radius"],
+            num_points=config["num_points"],
+            accel_ratio=accel_ratio,
+            galactic_radius=engine_gr,
+            vortex_strength=vortex_val,
+        )
+        engine = GravisEngine.rotation_curve(engine_config, m200=m200)
+        result = engine.run()
+
+        response = result.to_api_response()
+        response["auto_origin_throughput"] = vortex_val
+        response["theoretical_origin_throughput"] = theoretical_ot
+
+        if infer_result and infer_result.get("method", "").startswith("inference"):
+            response["throughput_fit"] = {
+                "method": infer_result["method"],
+                "gfd_rms_km_s": infer_result["gfd_rms"],
+                "rms_km_s": infer_result["rms"],
+                "chi2_dof": infer_result["chi2_dof"],
+            }
+            response["optimized_mass_model"] = run_mass_model
+            if "gene_report" in infer_result:
+                response["gene_report"] = infer_result["gene_report"]
+            if "band_coverage" in infer_result:
+                response["band_coverage"] = infer_result["band_coverage"]
+
+        # Field geometry: prefer inference result (uses Stage 3 fitted
+        # masses), fall back to computing from current mass model.
+        if infer_result and "field_geometry" in infer_result:
+            response["field_geometry"] = infer_result["field_geometry"]
+        else:
+            response["field_geometry"] = self._field_geometry(
+                run_mass_model, accel_ratio)
+
+        response["cdm_halo"] = cdm_halo_info
+
+        # Fit quality metrics (computed against optimized mass model)
+        response["metrics"] = compute_fit_metrics(
+            [float(r) for r in result.radii],
+            [float(v) for v in result.series("gfd")],
+            observations,
+            engine_config,
+        )
 
         return response
 
@@ -149,6 +280,18 @@ class RotationService(GravisService):
             except ValueError as e:
                 return jsonify({"error": str(e)}), 400
             result = service.compute(config)
+            return jsonify(result)
+
+        # -- Inference rotation curve --
+        @bp.route("/rotation/inference", methods=["POST"])
+        @bp.route("/rotation/infer-curve", methods=["POST"])
+        def rotation_inference():
+            data = request.get_json()
+            try:
+                config = service.validate(data)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            result = service.compute_infer(config)
             return jsonify(result)
 
         # -- Single-point mass inference --
@@ -417,6 +560,32 @@ class RotationService(GravisService):
                 },
                 "shape_diagnostic": shape_diagnostic,
             })
+
+        # -- Field Analysis (GFD telemetry) --
+        @bp.route("/rotation/field_analysis", methods=["POST"])
+        def rotation_field_analysis():
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request body must be JSON"}), 400
+
+            mass_model = data.get("mass_model")
+            galactic_radius = data.get("galactic_radius")
+            vortex_strength = data.get("vortex_strength")
+            accel_ratio = data.get("accel_ratio", 1.0)
+
+            if not mass_model or not galactic_radius or vortex_strength is None:
+                return jsonify({
+                    "error": "mass_model, galactic_radius, and "
+                             "vortex_strength are required"
+                }), 400
+
+            result = compute_field_analysis(
+                mass_model,
+                float(galactic_radius),
+                float(vortex_strength),
+                accel_ratio=float(accel_ratio),
+            )
+            return jsonify(result)
 
         # -- Galaxy catalog --
         @bp.route("/rotation/galaxies", methods=["GET"])

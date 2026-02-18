@@ -6,67 +6,8 @@
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-{% endblock %}
-
-{% block before_nav %}
-    <!-- Splash overlay: renders instantly before deferred scripts load -->
-    <div id="splash-overlay" style="
-        position: fixed; inset: 0; z-index: 9999;
-        background: #000000;
-        display: flex; flex-direction: column;
-        justify-content: center; align-items: center;
-        transition: opacity 0.5s ease-out;
-    ">
-        <style>
-            @keyframes splashBounce {
-                0%   { left: 0; }
-                50%  { left: calc(100% - 60px); }
-                100% { left: 0; }
-            }
-        </style>
-        <div style="display: flex; flex-direction: column; align-items: stretch;
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    user-select: none;">
-            <div style="
-                font-size: 4.5em; font-weight: 700;
-                color: #4da6ff; letter-spacing: 12px;
-                text-align: center;
-            ">GRAVIS</div>
-            <div style="
-                font-size: 1.05em; font-weight: 400;
-                color: #707070; letter-spacing: 0.5px;
-                text-align: center; margin-top: 10px;
-            ">Galactic Rotation from Field Dynamics</div>
-            <div style="
-                width: 100%; height: 3px;
-                background: #1a1a1a;
-                border-radius: 2px;
-                margin-top: 28px;
-                position: relative;
-                overflow: hidden;
-            ">
-                <div style="
-                    position: absolute; top: 0;
-                    width: 60px; height: 100%;
-                    background: #4da6ff;
-                    border-radius: 2px;
-                    animation: splashBounce 1.4s ease-in-out infinite;
-                "></div>
-            </div>
-            <div style="
-                font-size: 0.72em; font-weight: 400;
-                color: #333333; letter-spacing: 0.5px;
-                text-align: center; margin-top: 24px;
-            ">Open Source &middot; MIT License &middot; 2026</div>
-        </div>
-    </div>
-    <script>
-        if (sessionStorage.getItem('gravis_loaded')) {
-            document.getElementById('splash-overlay').remove();
-        } else {
-            sessionStorage.setItem('gravis_loaded', '1');
-        }
-    </script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -74,24 +15,9 @@
         <div class="screen active" id="screen-analysis" style="display: flex; flex-direction: column;">
 
             <!-- Command Bar: high-frequency controls at the top -->
-            <div class="command-bar" id="command-bar">
-                <div class="command-bar-left">
-                    <div class="command-mode-toggle">
-                        <button class="mode-button active" id="mode-prediction" onclick="setMode('prediction')">
-                            Prediction (M&#x2192;v)
-                        </button>
-                        <button class="mode-button" id="mode-inference" onclick="setMode('inference')">
-                            Inference (v&#x2192;M)
-                        </button>
-                    </div>
-                    <div class="command-separator"></div>
-                    <div class="command-galaxy">
-                        <select class="command-dropdown" id="examples-dropdown" onchange="loadExample()">
-                        </select>
-                    </div>
-                </div>
+            <div class="command-bar" id="command-bar" style="display: none;">
                 <div class="command-bar-right">
-                    <div class="command-distance">
+                    <div class="command-distance" style="display: none;">
                         <span class="command-label" id="distance-label">Distance</span>
                         <input type="range" id="distance-slider" min="0.1" max="100" step="0.1" value="10"
                                class="command-slider">
@@ -113,25 +39,46 @@
                         <input type="range" id="mass-slider" min="8" max="13" step="0.1" value="11">
                     </div>
 
-                    <!-- Mass Distribution Panel -->
-                    <div class="mass-model-section" id="mass-model-section">
-                        <div class="mass-model-header" style="cursor: default;">
+                    <!-- Observations Panel -->
+                    <div class="observations-panel">
+                        <div class="observations-panel-header">
+                            <span class="observations-panel-label">Observations</span>
+                        </div>
+                        <div class="observations-panel-body">
+                            <select class="observations-dropdown" id="examples-dropdown" onchange="loadExample()">
+                            </select>
+                            <button class="add-observation-btn" disabled title="Coming soon">
+                                + Add New Observation
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- View Mode Toggle: Mass Model (user estimates) vs Observations (GFD-derived) -->
+                    <div class="view-mode-toggle" id="view-mode-toggle" style="display: none;">
+                        <button class="view-mode-btn active" data-mode="mass-model">Mass Model</button>
+                        <button class="view-mode-btn" data-mode="observations">Observations</button>
+                    </div>
+
+                    <!-- Mass Model mode: editable Mass Distribution panel -->
+                    <div id="mass-model-panel" class="mass-model-section">
+                        <div class="mass-model-header" style="cursor: default; display: flex; align-items: center; justify-content: space-between;">
                             <span class="mass-model-header-text">Mass Distribution</span>
+                            <button type="button" id="reset-to-photometric-btn" class="reset-to-photometric-btn" style="display: none;" title="Restore mass model from photometry">Reset to photometric</button>
                         </div>
                         <div class="mass-model-content expanded" id="mass-model-content">
                             <div class="mass-model-body">
-                                <div class="mass-component bulge">
-                                    <div class="mass-component-title">Stellar Bulge (Hernquist)</div>
+                                <div class="mass-component gas">
+                                    <div class="mass-component-title">Gas Disk (HI + H2 + He)</div>
                                     <div class="control-label">
                                         <span>Mass</span>
-                                        <span class="control-value" id="bulge-mass-value">1.5e10 M_sun</span>
+                                        <span class="control-value" id="gas-mass-value">1.0e10 M_sun</span>
                                     </div>
-                                    <input type="range" id="bulge-mass-slider" min="7" max="11.5" step="0.01" value="10.176">
+                                    <input type="range" id="gas-mass-slider" min="7" max="11.5" step="0.001" value="10">
                                     <div class="control-label">
-                                        <span>Scale radius (a)</span>
-                                        <span class="control-value" id="bulge-scale-value">0.6 kpc</span>
+                                        <span>Scale length (R_d)</span>
+                                        <span class="control-value" id="gas-scale-value">5.0 kpc</span>
                                     </div>
-                                    <input type="range" id="bulge-scale-slider" min="0.1" max="3.0" step="0.1" value="0.6">
+                                    <input type="range" id="gas-scale-slider" min="1" max="25" step="0.5" value="5">
                                 </div>
                                 <div class="mass-component disk">
                                     <div class="mass-component-title">Stellar Disk (Exponential)</div>
@@ -139,25 +86,25 @@
                                         <span>Mass</span>
                                         <span class="control-value" id="disk-mass-value">5.0e10 M_sun</span>
                                     </div>
-                                    <input type="range" id="disk-mass-slider" min="7" max="12" step="0.01" value="10.699">
+                                    <input type="range" id="disk-mass-slider" min="7" max="12" step="0.001" value="10.699">
                                     <div class="control-label">
                                         <span>Scale length (R_d)</span>
                                         <span class="control-value" id="disk-scale-value">2.5 kpc</span>
                                     </div>
                                     <input type="range" id="disk-scale-slider" min="0.5" max="10" step="0.1" value="2.5">
                                 </div>
-                                <div class="mass-component gas">
-                                    <div class="mass-component-title">Gas Disk (HI + H2 + He)</div>
+                                <div class="mass-component bulge">
+                                    <div class="mass-component-title">Stellar Bulge (Hernquist)</div>
                                     <div class="control-label">
                                         <span>Mass</span>
-                                        <span class="control-value" id="gas-mass-value">1.0e10 M_sun</span>
+                                        <span class="control-value" id="bulge-mass-value">1.5e10 M_sun</span>
                                     </div>
-                                    <input type="range" id="gas-mass-slider" min="7" max="11.5" step="0.01" value="10">
+                                    <input type="range" id="bulge-mass-slider" min="7" max="11.5" step="0.001" value="10.176">
                                     <div class="control-label">
-                                        <span>Scale length (R_d)</span>
-                                        <span class="control-value" id="gas-scale-value">5.0 kpc</span>
+                                        <span>Scale radius (a)</span>
+                                        <span class="control-value" id="bulge-scale-value">0.6 kpc</span>
                                     </div>
-                                    <input type="range" id="gas-scale-slider" min="1" max="25" step="0.5" value="5">
+                                    <input type="range" id="bulge-scale-slider" min="0.1" max="3.0" step="0.1" value="0.6">
                                 </div>
                                 <div class="mass-model-total-row">
                                     <span>Total Baryonic Mass</span>
@@ -167,8 +114,67 @@
                         </div>
                     </div>
 
-                    <!-- Galactic Radius (R_env) slider -->
-                    <div class="control-group" id="galactic-radius-group">
+                    <!-- Observation mode: read-only Mass Distribution (from photometry) -->
+                    <div id="observation-mass-panel" class="mass-model-section" style="display: none;">
+                        <div class="mass-model-header" style="cursor: default;">
+                            <span class="mass-model-header-text">Mass Distribution (from photometry)</span>
+                        </div>
+                        <div class="mass-model-content expanded">
+                            <div class="mass-model-body">
+                                <div class="mass-component gas">
+                                    <div class="mass-component-title">Gas Disk (HI + H2 + He)</div>
+                                    <div class="control-label">
+                                        <span>Mass</span>
+                                        <span class="control-value" id="obs-gas-mass-value">--</span>
+                                    </div>
+                                    <div class="control-label">
+                                        <span>Scale length (R_d)</span>
+                                        <span class="control-value" id="obs-gas-scale-value">--</span>
+                                    </div>
+                                </div>
+                                <div class="mass-component disk">
+                                    <div class="mass-component-title">Stellar Disk (Exponential)</div>
+                                    <div class="control-label">
+                                        <span>Mass</span>
+                                        <span class="control-value" id="obs-disk-mass-value">--</span>
+                                    </div>
+                                    <div class="control-label">
+                                        <span>Scale length (R_d)</span>
+                                        <span class="control-value" id="obs-disk-scale-value">--</span>
+                                    </div>
+                                </div>
+                                <div class="mass-component bulge">
+                                    <div class="mass-component-title">Stellar Bulge (Hernquist)</div>
+                                    <div class="control-label">
+                                        <span>Mass</span>
+                                        <span class="control-value" id="obs-bulge-mass-value">--</span>
+                                    </div>
+                                    <div class="control-label">
+                                        <span>Scale radius (a)</span>
+                                        <span class="control-value" id="obs-bulge-scale-value">--</span>
+                                    </div>
+                                </div>
+                                <div class="mass-model-total-row">
+                                    <span>Total Baryonic Mass</span>
+                                    <span class="control-value" id="obs-mass-model-total-value">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GFD Diagnostics Panel -->
+                    <div class="mass-model-section" id="gfd-diagnostics-section" style="display: none;">
+                        <div class="mass-model-header" style="cursor: pointer;" onclick="var c=document.getElementById('gfd-diagnostics-content');c.classList.toggle('expanded');">
+                            <span class="mass-model-header-text">GFD Diagnostics</span>
+                        </div>
+                        <div class="mass-model-content expanded" id="gfd-diagnostics-content">
+                            <div id="gfd-diagnostics-body" style="padding: 8px 12px; font-size: 0.82em; color: #b0b0b0; line-height: 1.8;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Galactic Radius (R_env) slider (hidden for GFD integration) -->
+                    <div class="control-group" id="galactic-radius-group" style="display: none;">
                         <div class="control-label">
                             <span>Galactic Radius (R<sub>env</sub>)</span>
                             <span class="control-value" id="galactic-radius-value">50 kpc</span>
@@ -176,9 +182,22 @@
                         <input type="range" id="galactic-radius-slider" min="2" max="200" step="1" value="50">
                     </div>
 
-                    <div class="control-group" id="vortex-strength-group">
+                    <!-- Gravity Lens Throughput (hidden for GFD integration, will restore later) -->
+                    <div class="control-group" id="lens-throughput-group" style="display: none;">
                         <div class="control-label">
-                            <span>Origin Throughput (GFD&sigma;)</span>
+                            <span>Gravity Lens Throughput</span>
+                            <span class="control-value" id="lens-value">+/- 6.2%</span>
+                        </div>
+                        <input type="range" id="lens-slider" min="0" max="15" step="0.1" value="6.2">
+                        <div style="font-size: 0.75em; color: #505050; line-height: 1.6; margin-top: 2px;">
+                            Derived: (k/&#960;)<sup>1/4</sup> = 1.062 at k = 4
+                            <div style="margin-top: 3px; color: #404040;">Topological constraint from k = 4 field packing. Not a fit parameter.</div>
+                        </div>
+                    </div>
+
+                    <div class="control-group" id="vortex-strength-group" style="display: none;">
+                        <div class="control-label">
+                            <span>Origin Throughput</span>
                             <span class="control-value" id="vortex-strength-value">auto</span>
                             <button id="vortex-auto-btn" class="auto-btn active" title="Reset to auto-calculated value">Auto</button>
                         </div>
@@ -193,7 +212,7 @@
                         <input type="range" id="velocity-slider" min="50" max="400" step="1" value="200">
                     </div>
 
-                    <div class="control-group">
+                    <div class="control-group" id="accel-regime-group" style="display: none;">
                         <div class="control-label">
                             <span>Acceleration Regime</span>
                             <span class="control-value" id="accel-value">a/a&#x2080; = 1.0</span>
@@ -225,95 +244,301 @@
 
                     <div id="observed-legend" style="display: none;"></div>
 
-                    <div id="cdm-halo-info" style="display: none; margin-top: 12px; padding: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; font-size: 0.85em; line-height: 1.6;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <strong style="color: #ffffff;">&Lambda;CDM + NFW Halo</strong>
-                            <span style="font-size: 0.8em; color: #808080; font-style: italic;" id="cdm-fit-method"></span>
-                        </div>
-                        <div id="cdm-halo-details" style="color: #b0b0b0;"></div>
-                        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #333;">
-                            <table style="width: 100%; font-size: 0.9em;">
-                                <tr>
-                                    <td style="color: #808080;">Theory</td>
-                                    <td style="text-align: right; color: #808080;">Free Parameters</td>
-                                </tr>
-                                <tr>
-                                    <td style="color: #4da6ff;">Gravity Field Dynamics</td>
-                                    <td style="text-align: right; color: #4caf50; font-weight: bold;">0</td>
-                                </tr>
-                                <tr>
-                                    <td style="color: #ffffff;">&Lambda;CDM + NFW</td>
-                                    <td style="text-align: right; color: #ef5350; font-weight: bold;" id="cdm-param-count">2</td>
-                                </tr>
-                            </table>
-                        </div>
-                    </div>
+                    <!-- CDM halo info moved to right metrics panel -->
                 </div>
 
                 <div class="resize-handle" id="resize-handle"></div>
 
                 <div class="right-panel">
-                    <!-- Theory Toggle Bar -->
+                    <!-- Observation mode tabs: top of container like Cursor/VS Code tabs -->
+                    <div class="obs-tab-bar" id="obs-tab-bar" style="display: none;">
+                        <button class="obs-tab active" data-tab="chart">Chart</button>
+                        <button class="obs-tab" data-tab="data">Observation Data</button>
+                        <button class="obs-tab" data-tab="field-analysis" style="display: none;">Field Analysis</button>
+                    </div>
+
+                    <!-- Theory Toggle Bar (part of chart view content) -->
                     <div class="theory-toggles" id="theory-toggles">
                         <span class="theory-toggles-label">Plot</span>
                         <label class="theory-chip" data-series="observed" style="--chip-color: #FFC107;" title="Published rotation curve measurements with error bars">
                             <input type="checkbox" checked> Observed Data
                         </label>
-                        <label class="theory-chip" data-series="newtonian" style="--chip-color: #ff6b6b;" title="Newtonian gravity: v = sqrt(G M / r)">
-                            <input type="checkbox" checked> Newtonian
+                        <label class="theory-chip" data-series="gfd" style="--chip-color: #00E5A0;" title="GFD velocity curve from mass model">
+                            <input type="checkbox" checked> <span id="gfd-chip-label">GFD (Photometric)</span>
                         </label>
-                        <label class="theory-chip" data-series="gfd" style="--chip-color: #4da6ff;" title="GFD: zero-parameter prediction from the scalar-tensor action">
-                            <input type="checkbox" checked> GFD (Dual Tetrad)
+                        <!-- Old Bayesian GFD Sigma: hidden, replaced by fast spline-based version -->
+                        <label class="theory-chip" data-series="gfd_sigma_old" style="--chip-color: #ff44dd; display: none;" title="(Legacy) GFD Sigma from slow Bayesian fit">
+                            <input type="checkbox"> GFD Sigma (Bayesian)
                         </label>
-                        <label class="theory-chip" data-series="gfd_symmetric" style="--chip-color: #00E5FF;" title="GFD with Origin Throughput: vortex reflection of structural release through the Field Origin (R_t). Gas leverage beyond R_t counterbalances stellar compression inside R_t, setting the throughput direction and amplitude.">
-                            <input type="checkbox" checked> GFD&#963; (Dual Tetrad)
+                        <label class="theory-chip" data-series="gfd_accel" style="--chip-color: #aa44ff; display: none;" title="GFD derived from observed rotation curve">
+                            <input type="checkbox" checked> GFD (Observed)
                         </label>
-                        <label class="theory-chip" data-series="mond" style="--chip-color: #9966ff;" title="Modified Newtonian Dynamics (Milgrom 1983): mu(x) = x/sqrt(1+x^2)">
-                            <input type="checkbox" checked> MOND
+                        <label class="theory-chip" data-series="newtonian" style="--chip-color: #ff6b6b;" title="Newtonian gravity (baryons only)">
+                            <input type="checkbox"> Newtonian
                         </label>
-                        <label class="theory-chip" data-series="cdm" style="--chip-color: #ffffff;" title="Lambda CDM: baryonic mass + best-fit NFW dark matter halo">
-                            <input type="checkbox" checked> CDM
+                        <label class="theory-chip" data-series="mond" style="--chip-color: #9966ff;" title="Classical MOND (empirical)">
+                            <input type="checkbox"> MOND
+                        </label>
+                        <label class="theory-chip" data-series="cdm" style="--chip-color: #ffffff;" title="Lambda CDM + NFW halo">
+                            <input type="checkbox"> CDM
+                        </label>
+                        <!-- Hidden chips preserved for later reintroduction -->
+                        <label class="theory-chip" data-series="gfd_symmetric" style="--chip-color: #00E5FF; display: none;">
+                            <input type="checkbox"> GFD (Observed)
                         </label>
                     </div>
 
                     <div class="chart-container">
-                        <div id="chart-face" class="card-face">
-                            <canvas id="gravityChart"></canvas>
-                            <button id="reset-zoom-btn" class="reset-zoom-button" style="display: none;">
-                                &#x1F504; Reset Zoom
-                            </button>
-                            <button id="data-card-btn" class="data-card-button" style="display: none;"
-                                    onclick="openDataCard()">Data Sources</button>
-                        </div>
-                        <div id="data-face" class="card-face" style="display: none;">
-                            <button class="data-card-button" onclick="closeDataCard()">Back to Chart</button>
-                            <div class="data-card-body">
-                                <h2 id="dc-title" class="dc-title"></h2>
-                                <div id="dc-summary" class="dc-section"></div>
-
-                                <h3>Mass Model</h3>
-                                <table class="dc-table">
-                                    <thead>
-                                        <tr><th>Component</th><th>Mass (M_sun)</th><th>Scale (kpc)</th><th>Profile</th></tr>
-                                    </thead>
-                                    <tbody id="dc-mass-tbody"></tbody>
-                                </table>
-                                <div id="dc-total-mass" class="dc-total"></div>
-
-                                <h3>Observational Data</h3>
-                                <table class="dc-table">
-                                    <thead>
-                                        <tr><th>r (kpc)</th><th>v (km/s)</th><th>1-sigma (km/s)</th></tr>
-                                    </thead>
-                                    <tbody id="dc-obs-tbody"></tbody>
-                                </table>
-
-                                <h3>References</h3>
-                                <ul id="dc-references" class="dc-references"></ul>
-
-                                <div id="dc-methodology" class="dc-methodology"></div>
+                        <div id="chart-loading-overlay" style="display:none; position:absolute; inset:0; z-index:10; background:rgba(20,22,30,0.85); align-items:center; justify-content:center; border-radius:8px;">
+                            <div style="text-align:center;">
+                                <div class="chart-spinner"></div>
+                                <div style="color:#888; font-size:13px; margin-top:10px;">Loading observation curves...</div>
                             </div>
                         </div>
+                        <div class="chart-main-wrapper">
+                            <div id="chart-face" class="card-face">
+                                <canvas id="gravityChart"></canvas>
+                                <button id="reset-zoom-btn" class="chart-action-button" style="display: none;">Reset Zoom</button>
+                            </div>
+                        </div>
+                        <div id="vps-panel" class="vps-panel" style="display: none;">
+                            <div class="vps-panel-label">VPS: Boost / Suppress v2</div>
+                            <div class="vps-chart-wrap">
+                                <canvas id="vpsChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Observation Data tab content (markdown-preview style, panel-level scroll) -->
+                    <div id="obs-data-face" class="obs-data-face" style="display: none;">
+                        <div class="obs-font-toolbar">
+                            <button class="obs-font-btn" data-dir="-1" title="Decrease font size">A&#8722;</button>
+                            <button class="obs-font-btn" data-dir="1" title="Increase font size">A+</button>
+                        </div>
+                        <div class="obs-data-content" id="obs-data-content">
+                            <!-- Populated dynamically by showObsTabs() -->
+                        </div>
+                    </div>
+
+                    <!-- Field Analysis tab content (GFD metrics + equation display) -->
+                    <div id="field-analysis-face" class="obs-data-face" style="display: none;">
+                        <div class="obs-font-toolbar">
+                            <button class="obs-font-btn" data-dir="-1" title="Decrease font size">A&#8722;</button>
+                            <button class="obs-font-btn" data-dir="1" title="Increase font size">A+</button>
+                        </div>
+                        <div class="obs-data-content" id="field-analysis-content">
+                            <!-- Populated dynamically by loadFieldAnalysis() -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Metrics Panel -->
+                <div class="metrics-resize-handle" id="metrics-resize-handle"></div>
+                <div class="metrics-panel" id="metrics-panel">
+                    <div class="metrics-collapse-btn" id="metrics-collapse-btn" onclick="toggleMetricsPanel()" title="Toggle metrics panel">
+                        <span class="metrics-collapse-icon" id="metrics-collapse-icon">&#9654;</span>
+                    </div>
+
+                    <!-- Observation Diagnostics (top pane, hidden until observation mode) -->
+                    <div class="metrics-pane metrics-pane-top" id="metrics-pane-top" style="display: none;">
+                        <div class="metrics-section" id="metrics-automap-summary">
+                            <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                                <span class="metrics-header-text">Observation Results</span>
+                                <span class="metrics-chevron">&#9660;</span>
+                            </div>
+                            <div class="metrics-body">
+                                <div class="metrics-row">
+                                    <span class="metrics-label">GFD Base RMS</span>
+                                    <span class="metrics-value" id="metric-am-gfd-rms">--</span>
+                                </div>
+                                <div class="metrics-row">
+                                    <span class="metrics-label">Reduced &#967;&#178;/dof</span>
+                                    <span class="metrics-value" id="metric-am-chi2">--</span>
+                                </div>
+                                <div class="metrics-row">
+                                    <span class="metrics-label">Band Hits</span>
+                                    <span class="metrics-value" id="metric-am-band-hits">--</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="metrics-section" id="metrics-field-geometry">
+                            <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                                <span class="metrics-header-text">Field Geometry</span>
+                                <span class="metrics-chevron">&#9660;</span>
+                            </div>
+                            <div class="metrics-body">
+                                <div class="metrics-row">
+                                    <span class="metrics-label">Origin Throughput</span>
+                                    <span class="metrics-value" id="metric-fg-throughput">--</span>
+                                </div>
+                                <div class="metrics-row">
+                                    <span class="metrics-label">Field Origin (R<sub>t</sub>)</span>
+                                    <span class="metrics-value" id="metric-fg-origin">--</span>
+                                </div>
+                                <div class="metrics-row">
+                                    <span class="metrics-label">Field Horizon (R<sub>env</sub>)</span>
+                                    <span class="metrics-value" id="metric-fg-horizon">--</span>
+                                </div>
+                                <div class="metrics-row">
+                                    <span class="metrics-label">R<sub>t</sub> / R<sub>env</sub></span>
+                                    <span class="metrics-value" id="metric-fg-ratio">--</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="metrics-section" id="metrics-automap-params">
+                            <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                                <span class="metrics-header-text">Parameters Adjusted</span>
+                                <span class="metrics-chevron">&#9660;</span>
+                            </div>
+                            <div class="metrics-body">
+                                <div class="metrics-residuals-table-wrap">
+                                    <table class="metrics-residuals-table" id="metrics-automap-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="text-align: left;">Param</th>
+                                                <th>Prior</th>
+                                                <th>Current</th>
+                                                <th>&#916;%</th>
+                                                <th>&#963; exc</th>
+                                                <th>&#967;&#178; bought</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="metrics-automap-tbody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Vertical resize divider between top and bottom panes -->
+                    <div class="metrics-pane-divider" id="metrics-pane-divider" style="display: none;"></div>
+
+                    <!-- Existing metrics (bottom pane) -->
+                    <div class="metrics-pane metrics-pane-bottom" id="metrics-pane-bottom">
+                    <div class="metrics-section" id="metrics-fit-quality">
+                        <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                            <span class="metrics-header-text">Fit Quality</span>
+                            <span class="metrics-chevron">&#9660;</span>
+                        </div>
+                        <div class="metrics-body">
+                            <div class="metrics-row">
+                                <span class="metrics-label">RMS</span>
+                                <span class="metrics-value" id="metric-rms">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Reduced &#967;&#178;</span>
+                                <span class="metrics-value" id="metric-chi2">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Within 1&#963;</span>
+                                <span class="metrics-value" id="metric-hits-1s">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Within 2&#963;</span>
+                                <span class="metrics-value" id="metric-hits-2s">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metrics-section" id="metrics-obs-summary">
+                        <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                            <span class="metrics-header-text">Observation Summary</span>
+                            <span class="metrics-chevron">&#9660;</span>
+                        </div>
+                        <div class="metrics-body">
+                            <div class="metrics-row">
+                                <span class="metrics-label">Data Points</span>
+                                <span class="metrics-value" id="metric-npoints">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Radial Range</span>
+                                <span class="metrics-value" id="metric-radial-range">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Mean Error</span>
+                                <span class="metrics-value" id="metric-mean-err">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metrics-section" id="metrics-mass-model">
+                        <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                            <span class="metrics-header-text">Mass Model</span>
+                            <span class="metrics-chevron">&#9660;</span>
+                        </div>
+                        <div class="metrics-body">
+                            <div class="metrics-row">
+                                <span class="metrics-label">Total Baryonic</span>
+                                <span class="metrics-value" id="metric-total-mass">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Gas Fraction</span>
+                                <span class="metrics-value" id="metric-gas-frac">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Field Origin (R<sub>t</sub>)</span>
+                                <span class="metrics-value" id="metric-field-origin">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Field Horizon (R<sub>env</sub>)</span>
+                                <span class="metrics-value" id="metric-field-horizon">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metrics-section" id="metrics-cdm">
+                        <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                            <span class="metrics-header-text">CDM Comparison</span>
+                            <span class="metrics-chevron">&#9660;</span>
+                        </div>
+                        <div class="metrics-body">
+                            <div class="metrics-row">
+                                <span class="metrics-label">M<sub>200</sub></span>
+                                <span class="metrics-value" id="metric-cdm-m200">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Concentration (c)</span>
+                                <span class="metrics-value" id="metric-cdm-c">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">r<sub>200</sub></span>
+                                <span class="metrics-value" id="metric-cdm-r200">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Method</span>
+                                <span class="metrics-value metrics-value-sm" id="metric-cdm-method">--</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">Free Parameters</span>
+                                <span class="metrics-value" id="metric-cdm-params">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metrics-section collapsed" id="metrics-residuals">
+                        <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                            <span class="metrics-header-text">Residuals</span>
+                            <span class="metrics-chevron">&#9654;</span>
+                        </div>
+                        <div class="metrics-body" style="display: none;">
+                            <div class="metrics-residuals-table-wrap">
+                                <table class="metrics-residuals-table" id="metrics-residuals-table">
+                                    <thead>
+                                        <tr>
+                                            <th>r</th>
+                                            <th>v<sub>obs</sub></th>
+                                            <th>v<sub>gfd</sub></th>
+                                            <th>&#916;v</th>
+                                            <th>&#963;</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="metrics-residuals-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
                     </div>
                 </div>
             </div>

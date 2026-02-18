@@ -2,6 +2,14 @@
 
 {% block title %}GRAVIS - Home{% endblock %}
 
+{% block head %}
+    {# Preload analysis/field libs for faster load when user opens Rotation Curves or Field #}
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" as="script">
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8" as="script">
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" as="script">
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" as="script">
+{% endblock %}
+
 {% block content %}
 <div class="home-screen">
     <div class="home-container">
@@ -14,15 +22,11 @@
 
         <!-- Paper callout -->
         <div class="home-callout">
-            <div class="home-callout-label">Submitted to Physical Review D</div>
-            <div class="home-callout-paper">
-                Dual Tetrad Topology and the Field Origin: From Nuclear Decay to Galactic Dynamics
-            </div>
             <div class="home-callout-sub">
-                Bidirectional Validation of a Zero-Parameter Gravitational Field Theory
+                Dual Tetrad Topology and Covariant Completion: Zero-Parameter Scalar-Tensor Formulation
             </div>
             <p class="home-callout-note">
-                The GFD action is implemented in the
+                Gravity Field Dynamics (GFD) is the covariant completion of the dual tetrad topology, producing a zero-parameter scalar-tensor action in which every physical quantity is derived from the geometry. The GFD prediction is available in the
                 <strong>Rotation Curves</strong> module under the
                 <span class="home-callout-badge" style="--chip-color: #4da6ff;">GFD</span>
                 series label on all graphs.
@@ -73,7 +77,7 @@
         {% for cat in category_order %}
             {% set cat_services = [] %}
             {% for s in services %}
-                {% if s.category == cat %}
+                {% if s.category == cat and s.id != "sandbox" %}
                     {% if cat_services.append(s) %}{% endif %}
                 {% endif %}
             {% endfor %}

@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GRAVIS</title>
+    <!-- Preload libs during splash so they are cached when user opens Rotation Curves or The Gravity Field -->
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" as="script">
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8" as="script">
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" as="script">
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" as="script">
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" as="script">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -42,10 +48,29 @@
             from { opacity: 0; transform: scale(0.95); }
             to   { opacity: 1; transform: scale(1); }
         }
+        .splash-license {
+            position: absolute;
+            bottom: 24px;
+            left: 0;
+            right: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 0.72em;
+            font-weight: 400;
+            color: #333333;
+            letter-spacing: 0.5px;
+            text-align: center;
+            user-select: none;
+            opacity: 0;
+            animation: fadeIn 1s ease-out 0.8s forwards;
+        }
     </style>
 </head>
-<body onclick="window.location.href='/'">
+<body onclick="window.location.href='/home'">
     <div class="splash-text">GRAVIS</div>
-    <div class="splash-sub">Gravity Field Dynamics Research Platform</div>
+    <div class="splash-sub">Galactic Rotation from Field Dynamics</div>
+    <div class="splash-license">Open Source &middot; AGPL-3.0 &middot; (C) 2026 Stephen Nelson / Field Dynamics</div>
+    <script>
+        setTimeout(function() { window.location.href = '/home'; }, 3000);
+    </script>
 </body>
 </html>

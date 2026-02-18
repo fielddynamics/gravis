@@ -1,15 +1,29 @@
 """
-GravisEngine: traceable computation pipeline for rotation curve analysis.
+GravisEngine: shared pipeline infrastructure for GRAVIS.
 
-This module provides the core pipeline architecture for GRAVIS. Every
-computation step (mass model evaluation, theory velocity prediction,
-mass inference) flows through GravisStage objects that record the
-equation used, the parameters supplied, all intermediate values, and
-the final output series. The result is a GravisResult that can produce
-either the existing flat API response or a verbose trace of the full
-computation chain.
+ARCHITECTURE RULE: This module is the shared computation core. It
+contains ONLY pipeline infrastructure (config, stages, engine, result)
+and shared utility functions (compute_fit_metrics, _interpolate).
 
-Classes:
+DO NOT add domain logic, optimization algorithms, physics models, or
+service-specific code here. Those belong in their respective service
+modules under physics/services/*, following the Registry / Dependency
+Injection pattern:
+
+    app.py
+      -> GravisRegistry.register(RotationService())
+         -> RotationService delegates to:
+            - physics.services.rotation.inference  (optimize_inference)
+            - physics.sigma                        (GfdSymmetricStage)
+            - physics.engine                       (GravisEngine pipeline)
+
+If you need to add new physics:
+    1. Create a module under physics/ for shared equations/stages
+    2. Create or extend a service under physics/services/ for the logic
+    3. Register that service in app.py via the GravisRegistry
+    4. The service calls GravisEngine to run the pipeline
+
+This module provides:
     GravisConfig   - Global pipeline parameters (mass model, radii, etc.)
     GravisStage    - Atomic computation unit with a callable equation
     StageResult    - Immutable record of one stage's execution
@@ -204,264 +218,20 @@ class GravisStage:
         )
 
 
-def auto_vortex_strength(mass_model, galactic_radius_kpc):
-    """
-    Estimate Origin Throughput from the gas leverage around the
-    Field Origin (R_t = 0.30 * R_env).
-
-    Gas leverage measures the fraction of total mass that is gas
-    beyond R_t, weighted by how far it extends (its lever arm).
-    This captures the bidirectional compression hypothesis: stellar
-    mass consumed inside R_t compresses the field, while gas outside
-    R_t provides a counter-tension. The net balance determines the
-    throughput direction and magnitude.
-
-    Uses a log-linear regression on gas_leverage derived from 8
-    galaxies with well-constrained throughput values (Spearman r = 0.90):
-
-        sigma = 1.1545 + 1.4066 * log10(gas_leverage)
-
-    where gas_leverage = f_gas_outside * (2*Rd_gas + R_t) / R_t.
-
-    Returns the estimated throughput (can be negative for highly
-    concentrated galaxies like the Milky Way).
-    """
-    R_env = galactic_radius_kpc
-    if R_env <= 0:
-        return 0.0
-
-    R_t = 0.30 * R_env
-    mm = mass_model
-
-    # Stellar mass
-    m_bulge = 0.0
-    m_disk = 0.0
-    if mm.get("bulge") and mm["bulge"].get("M"):
-        m_bulge = mm["bulge"]["M"]
-    if mm.get("disk") and mm["disk"].get("M"):
-        m_disk = mm["disk"]["M"]
-    m_stellar = m_bulge + m_disk
-
-    # Gas mass and scale length
-    m_gas = 0.0
-    Rd_gas = 1.0
-    if mm.get("gas") and mm["gas"].get("M"):
-        m_gas = mm["gas"]["M"]
-        Rd_gas = mm["gas"].get("Rd", 1.0)
-
-    m_total = m_stellar + m_gas
-    if m_total <= 0:
-        return 0.0
-
-    # Gas mass inside R_t (exponential disk profile)
-    m_gas_inside = 0.0
-    if m_gas > 0 and Rd_gas > 0:
-        x = R_t / Rd_gas
-        if x < 50:
-            m_gas_inside = m_gas * (1.0 - (1.0 + x) * math.exp(-x))
-        else:
-            m_gas_inside = m_gas
-
-    # Gas mass outside R_t
-    m_gas_outside = m_gas - m_gas_inside
-
-    # Fraction of total mass that is gas beyond R_t
-    f_gas_outside = m_gas_outside / m_total if m_total > 0 else 0.0
-
-    # Gas leverage: f_gas_outside weighted by lever arm
-    # (how far the gas extends beyond R_t relative to R_t)
-    if R_t > 0 and f_gas_outside > 0:
-        gas_lever_arm = (Rd_gas * 2.0 + R_t) / R_t
-        gas_leverage = f_gas_outside * gas_lever_arm
-    else:
-        gas_leverage = 0.001  # floor to avoid log(0)
-
-    # Clamp to avoid log domain issues
-    if gas_leverage <= 0:
-        gas_leverage = 0.001
-
-    # Log-linear regression: sigma = 1.1545 + 1.4066 * log10(gl)
-    sigma = 1.1545 + 1.4066 * math.log10(gas_leverage)
-    return round(sigma, 2)
-
-
-class GfdSymmetricStage:
-    """
-    Origin Throughput stage (GFD-sigma).
-
-    The Field Origin (R_t = 0.30 * R_env) acts as an aperture for
-    structural energy flow. Stellar mass compressed inside R_t drives
-    the field inward; gas extending beyond R_t provides a counter-
-    tension (lever arm). The net balance, the Origin Throughput,
-    determines the direction and amplitude of the structural correction.
-
-    Outer arm (r > R_t): structural release with 3/4 power law,
-    scaled by the effective gas fraction and throughput modulator.
-
-    Inner arm (r < R_t): vortex reflection of the outer delta profile.
-    Each inner radius maps to a mirror point on the outer arm:
-        f = (R_t - r) / R_t           fractional depth into core
-        r_mirror = R_t + f*(R_env-R_t) mirror point on outer arm
-        delta_inner(r) = delta_outer(r_mirror)
-
-    The throughput can be auto-calculated from gas leverage
-    (Spearman r = 0.90 across 8 calibration galaxies) or set
-    manually by the researcher.
-    """
-
-    THROAT_FRAC = 0.30
-    STRUCT_FRAC = 4.0 / 13.0   # 0.3077
-    P_OUTER = 3.0 / 4.0        # d/k = 0.75
-
-    def __init__(self, name, equation_label, parameters=None):
-        self.name = name
-        self.equation_label = equation_label
-        self.parameters = parameters or {}
-
-    def process(self, radii, enclosed_masses):
-        """
-        Two-pass vortex-reflection computation.
-
-        Pass 1: compute DTG base + outer structural boost for r > R_t.
-        Pass 2: reflect outer delta profile into inner region via
-                vortex mapping.
-        """
-        from physics.equations import aqual_solve_x, G, M_SUN, A0, KPC_TO_M
-
-        accel_ratio = self.parameters.get("accel_ratio", 1.0)
-        R_env = self.parameters.get("galactic_radius_kpc", 0.0)
-        m_stellar = self.parameters.get("m_stellar", 0.0)
-        f_gas = self.parameters.get("f_gas", 0.0)
-        vortex_strength = self.parameters.get("vortex_strength", 1.0)
-
-        R_t = self.THROAT_FRAC * R_env
-        f_eff = (1.0 + f_gas) / 2.0 * vortex_strength
-        L_outer = R_env - R_t
-
-        # Pre-compute reference acceleration
-        g0 = 0.0
-        if m_stellar > 0 and R_t > 0:
-            R_t_m = R_t * KPC_TO_M
-            g0 = self.STRUCT_FRAC * G * m_stellar * M_SUN / (R_t_m * R_t_m)
-
-        # ----------------------------------------------------------
-        # Pass 1: DTG base + outer velocity deltas
-        # ----------------------------------------------------------
-        n = len(radii)
-        v_base = [0.0] * n
-        v_outer_delta = [0.0] * n
-        g_dtg_arr = [0.0] * n
-        g_struct_arr = [0.0] * n
-
-        # Collect outer (r, delta) pairs for interpolation
-        outer_r = []
-        outer_dv = []
-
-        for i in range(n):
-            r_kpc = radii[i]
-            m_solar = enclosed_masses[i]
-
-            if r_kpc <= 0 or m_solar <= 0:
-                continue
-
-            r_m = r_kpc * KPC_TO_M
-            M = m_solar * M_SUN
-            gN = G * M / (r_m * r_m)
-            a0_eff = A0 * accel_ratio
-            y_N = gN / a0_eff
-            x = aqual_solve_x(y_N)
-            g_dtg = a0_eff * x
-            g_dtg_arr[i] = g_dtg
-            v_base[i] = math.sqrt(g_dtg * r_m) / 1000.0
-
-            if r_kpc > R_t and R_env > R_t and g0 > 0:
-                xi = (r_kpc - R_t) / L_outer
-                g_s = f_eff * g0 * (xi ** self.P_OUTER)
-                g_struct_arr[i] = g_s
-                g_total = g_dtg + g_s
-                if g_total > 0:
-                    v_enh = math.sqrt(g_total * r_m) / 1000.0
-                else:
-                    v_enh = 0.0
-                dv = v_enh - v_base[i]
-                v_outer_delta[i] = dv
-                if r_kpc <= R_env:
-                    outer_r.append(r_kpc)
-                    outer_dv.append(dv)
-
-        # ----------------------------------------------------------
-        # Pass 2: vortex reflection into inner region
-        # ----------------------------------------------------------
-        # For each inner point, map to mirror outer radius and
-        # interpolate the outer delta.
-        output_series = []
-        intermed = {
-            "g_N": [], "g_DTG": [], "g_struct": [], "g_total": [],
-            "R_t": [], "f_eff": [], "v_delta": [],
-            "vortex_strength": [],
-        }
-
-        for i in range(n):
-            r_kpc = radii[i]
-            r_m = r_kpc * KPC_TO_M if r_kpc > 0 else 0.0
-            vb = v_base[i]
-            v_delta = 0.0
-            g_s = 0.0
-
-            if r_kpc <= 0 or enclosed_masses[i] <= 0:
-                v = 0.0
-            elif r_kpc > R_t:
-                # Outer: use computed structural release
-                v_delta = v_outer_delta[i]
-                v = max(vb + v_delta, 0.0)
-                g_s = g_struct_arr[i]
-            elif r_kpc < R_t and R_t > 0 and L_outer > 0 and outer_r:
-                # Inner: vortex reflection
-                f_depth = (R_t - r_kpc) / R_t
-                r_mirror = R_t + f_depth * L_outer
-                # Linear interpolation of outer delta at r_mirror
-                dv_mirror = self._interp(outer_r, outer_dv, r_mirror)
-                v_delta = -dv_mirror
-                v = max(vb + v_delta, 0.0)
-                g_s = -(dv_mirror / vb) * g_dtg_arr[i] if vb > 0 else 0.0
-            else:
-                v = vb
-
-            output_series.append(v)
-            intermed["g_N"].append(
-                G * enclosed_masses[i] * M_SUN / (r_m * r_m)
-                if r_m > 0 else 0.0
-            )
-            intermed["g_DTG"].append(g_dtg_arr[i])
-            intermed["g_struct"].append(g_s)
-            intermed["g_total"].append(g_dtg_arr[i] + g_s)
-            intermed["R_t"].append(R_t)
-            intermed["f_eff"].append(f_eff)
-            intermed["v_delta"].append(v_delta)
-            intermed["vortex_strength"].append(vortex_strength)
-
-        return StageResult(
-            name=self.name,
-            equation_label=self.equation_label,
-            parameters=self.parameters,
-            series=output_series,
-            intermediates=intermed,
-        )
-
-    @staticmethod
-    def _interp(xs, ys, x_target):
-        """Linear interpolation / extrapolation on sorted (xs, ys)."""
-        if not xs:
-            return 0.0
-        if x_target <= xs[0]:
-            return ys[0]
-        if x_target >= xs[-1]:
-            return ys[-1]
-        for j in range(len(xs) - 1):
-            if xs[j] <= x_target <= xs[j + 1]:
-                t = (x_target - xs[j]) / (xs[j + 1] - xs[j])
-                return ys[j] + t * (ys[j + 1] - ys[j])
-        return ys[-1]
+# ---------------------------------------------------------------
+# Backward-compatible re-exports ONLY. No new code belongs here.
+#
+# Canonical locations (import from these in new code):
+#   physics.sigma                        -> GfdSymmetricStage, auto_vortex_strength
+#   physics.services.rotation.inference  -> optimize_inference
+#
+# optimize_inference is NOT re-exported here (circular import).
+# Import it from physics.services.rotation.inference directly.
+# ---------------------------------------------------------------
+from physics.sigma import (                       # noqa: F401, E402
+    GfdSymmetricStage,
+    auto_vortex_strength,
+)
 
 
 class GravisResult:
@@ -574,6 +344,159 @@ class GravisResult:
         }
 
 
+def compute_fit_metrics(radii, gfd_velocities, observations, config):
+    """
+    Compute fit quality metrics for GFD vs observation data.
+
+    This is the single source of truth for all scientific quality
+    metrics displayed in the UI. It lives here so that the same
+    function can be called from the prediction endpoint, the
+    inference endpoint, and unit tests.
+
+    Parameters
+    ----------
+    radii : list of float
+        Galactocentric radii from the pipeline (kpc).
+    gfd_velocities : list of float
+        GFD model velocities at each radius (km/s).
+    observations : list of dict or None
+        Each dict has 'r' (kpc), 'v' (km/s), 'err' (km/s).
+    config : GravisConfig
+        Pipeline config for mass model and geometric parameters.
+
+    Returns
+    -------
+    dict
+        Metrics dictionary with keys:
+        - fit_quality: { rms_km_s, chi2_reduced, within_1sigma,
+                         within_2sigma, n_obs }
+        - observation_summary: { n_points, r_min_kpc, r_max_kpc,
+                                 mean_error_km_s }
+        - mass_model: { total_baryonic_M_sun, gas_fraction_pct,
+                        field_origin_kpc, field_horizon_kpc }
+        - residuals: list of { r_kpc, v_obs, v_gfd, delta_v, sigma }
+    """
+    result = {}
+
+    # --- Mass Model summary (always available) ---
+    mm = config.mass_model
+    m_bulge = mm.get("bulge", {}).get("M", 0)
+    m_disk = mm.get("disk", {}).get("M", 0)
+    m_gas = mm.get("gas", {}).get("M", 0)
+    total = m_bulge + m_disk + m_gas
+    gas_frac = (m_gas / total * 100.0) if total > 0 else 0.0
+    r_env = config.galactic_radius
+    r_origin = 0.30 * r_env  # THROAT_FRAC
+
+    result["mass_model"] = {
+        "total_baryonic_M_sun": round(total, 2),
+        "gas_fraction_pct": round(gas_frac, 1),
+        "field_origin_kpc": round(r_origin, 1),
+        "field_horizon_kpc": round(r_env, 1),
+    }
+
+    # --- Observation-dependent metrics ---
+    if not observations or len(observations) == 0:
+        result["fit_quality"] = None
+        result["observation_summary"] = None
+        result["residuals"] = []
+        return result
+
+    # Observation summary
+    obs_radii = [o["r"] for o in observations]
+    obs_errors = [o.get("err", 0) for o in observations if o.get("err", 0) > 0]
+    mean_err = sum(obs_errors) / len(obs_errors) if obs_errors else 0.0
+
+    result["observation_summary"] = {
+        "n_points": len(observations),
+        "r_min_kpc": round(min(obs_radii), 2),
+        "r_max_kpc": round(max(obs_radii), 2),
+        "mean_error_km_s": round(mean_err, 1),
+    }
+
+    # Interpolate GFD velocity at each observation radius
+    residuals = []
+    sum_sq = 0.0
+    chi2 = 0.0
+    within_1s = 0
+    within_2s = 0
+    n_valid = 0
+
+    for obs in observations:
+        r_obs = obs["r"]
+        v_obs = obs["v"]
+        err = obs.get("err", 0)
+
+        # Linear interpolation of GFD curve at r_obs
+        v_gfd = _interpolate(radii, gfd_velocities, r_obs)
+        if v_gfd is None:
+            continue
+
+        dv = v_obs - v_gfd
+        sum_sq += dv * dv
+        n_valid += 1
+
+        sigma = None
+        if err and err > 0:
+            chi2 += (dv * dv) / (err * err)
+            sigma = abs(dv) / err
+            if sigma <= 1.0:
+                within_1s += 1
+            if sigma <= 2.0:
+                within_2s += 1
+        else:
+            # No error bar: count as within both bands
+            within_1s += 1
+            within_2s += 1
+
+        residuals.append({
+            "r_kpc": round(r_obs, 2),
+            "v_obs": round(v_obs, 2),
+            "v_gfd": round(v_gfd, 2),
+            "delta_v": round(dv, 2),
+            "sigma": round(sigma, 2) if sigma is not None else None,
+        })
+
+    result["residuals"] = residuals
+
+    if n_valid > 0:
+        dof = max(n_valid - 1, 1)
+        result["fit_quality"] = {
+            "rms_km_s": round(math.sqrt(sum_sq / n_valid), 2),
+            "chi2_reduced": round(chi2 / dof, 3),
+            "within_1sigma": within_1s,
+            "within_2sigma": within_2s,
+            "n_obs": n_valid,
+        }
+    else:
+        result["fit_quality"] = None
+
+    return result
+
+
+def _interpolate(xs, ys, x_target):
+    """
+    Linear interpolation of y at x_target given sorted (xs, ys).
+
+    Returns None if x_target is outside the data range.
+    """
+    if not xs or not ys or len(xs) != len(ys):
+        return None
+    if x_target <= xs[0]:
+        return ys[0]
+    if x_target >= xs[-1]:
+        return ys[-1]
+    for i in range(1, len(xs)):
+        if xs[i] >= x_target:
+            x0, y0 = xs[i - 1], ys[i - 1]
+            x1, y1 = xs[i], ys[i]
+            if x1 == x0:
+                return y0
+            t = (x_target - x0) / (x1 - x0)
+            return y0 + t * (y1 - y0)
+    return None
+
+
 class GravisEngine:
     """
     Pipeline orchestrator for GRAVIS computations.
@@ -673,10 +596,19 @@ class GravisEngine:
                 "a factory method like GravisEngine.rotation_curve()."
             )
 
-        # Step 1: Compute radii from config
+        # Step 1: Compute radii from config.
+        # The grid must extend to at least galactic_radius (R_env) so
+        # the sigma stage's vortex reflection has full outer delta data.
+        # Scale point count proportionally so the per-kpc density stays
+        # the same as the originally requested grid.
+        grid_max = max(self.config.max_radius, self.config.galactic_radius)
+        n_pts = self.config.num_points
+        if grid_max > self.config.max_radius and self.config.max_radius > 0:
+            scale = grid_max / self.config.max_radius
+            n_pts = min(int(self.config.num_points * scale), 500)
         radii = []
-        for i in range(self.config.num_points):
-            r = (self.config.max_radius / self.config.num_points) * (i + 1)
+        for i in range(n_pts):
+            r = (grid_max / n_pts) * (i + 1)
             radii.append(r)
 
         # Step 2: Run mass model stage at each radius
@@ -893,3 +825,13 @@ class GravisEngine:
             series=[mass],
             intermediates={k: [v] for k, v in intermediates.items()},
         )
+
+
+# ===================================================================
+# STOP: Do not add new functions, classes, or logic below this line.
+#
+# This module is the shared pipeline core. All domain-specific logic
+# (inference, optimization, physics models) belongs in a GravisService
+# under physics/services/ and is registered via the GravisRegistry in
+# app.py. See the module docstring for the architectural pattern.
+# ===================================================================

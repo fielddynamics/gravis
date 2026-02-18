@@ -19,6 +19,7 @@ const PHYS = {
     A0: 16 * 6.67430e-11 * 9.1093837139e-31 / (2.8179403205e-15 * 2.8179403205e-15)
     // A0 = k^2 * G * m_e / r_e^2 ~ 1.22e-10 m/s^2
 };
+const THROAT_FRAC = 0.30;  // R_t / R_env emergent ratio (mirrors physics.constants.THROAT_FRAC)
 
 // =====================================================================
 // STATE
@@ -30,7 +31,13 @@ let pinnedGalaxyLabel = null;    // galaxy name stays in chart title when pinned
 let pinnedGalaxyExample = null;  // full example ref for Data Sources card
 let isLoadingExample = false;
 let galaxyCatalog = { prediction: [], inference: [] };
+let isAutoFitted = false;        // true when in Observation mode (GFD derived from data)
 let lastCdmHalo = null;
+let lastApiResponse = null;      // last API response from updateChart()
+let inferredFieldGeometry = null; // field geometry from topological prediction (after inference)
+let sandboxResult = null;        // cached response from sandbox API (photometric + sigma curves)
+let photometricResult = null;    // cached response from fast photometric API (includes spline)
+let massModelManuallyModified = false;  // true when user changed mass sliders from photometric (enables Reset, manual GFD)
 
 /**
  * Get the galactic radius (gravitational horizon) from the slider.
@@ -48,6 +55,8 @@ let lastMassModel = null;       // cached mass model for band recompute
 // Debounce timer for API calls
 let updateTimer = null;
 const DEBOUNCE_MS = 80;
+let manualGfdTimer = null;
+const MANUAL_GFD_DEBOUNCE_MS = 150;
 
 // =====================================================================
 // DOM ELEMENTS
@@ -60,11 +69,14 @@ const velocitySlider = document.getElementById('velocity-slider');
 const accelSlider = document.getElementById('accel-slider');
 const galacticRadiusSlider = document.getElementById('galactic-radius-slider');
 const galacticRadiusValue = document.getElementById('galactic-radius-value');
+const lensSlider = document.getElementById('lens-slider');
+const lensValue = document.getElementById('lens-value');
 const vortexStrengthSlider = document.getElementById('vortex-strength-slider');
 const vortexStrengthValue = document.getElementById('vortex-strength-value');
 const vortexAutoBtn = document.getElementById('vortex-auto-btn');
 let autoVortexStrength = null;  // last auto-calculated value from API
 let isAutoThroughput = true;    // when true, backend computes the value
+let inferenceNeeded = false;    // true only on initial galaxy load in inference mode
 const distanceValue = document.getElementById('distance-value');
 const massValue = document.getElementById('mass-value');
 const velocityValue = document.getElementById('velocity-value');
@@ -94,7 +106,7 @@ function formatMassCompact(logMass) {
     const val = Math.pow(10, logMass);
     const exp = Math.floor(Math.log10(val));
     const coeff = val / Math.pow(10, exp);
-    return coeff.toFixed(2) + 'e' + exp;
+    return coeff.toFixed(3) + 'e' + exp;
 }
 
 function superscript(num) {
@@ -149,22 +161,62 @@ function updateMassModelDisplays() {
     const total = bm + dm + gm;
 
     document.getElementById('bulge-mass-value').textContent = formatMassCompact(parseFloat(bulgeMassSlider.value)) + ' M_sun';
-    document.getElementById('bulge-scale-value').textContent = parseFloat(bulgeScaleSlider.value).toFixed(1) + ' kpc';
+    document.getElementById('bulge-scale-value').textContent = parseFloat(bulgeScaleSlider.value).toFixed(2) + ' kpc';
     document.getElementById('disk-mass-value').textContent = formatMassCompact(parseFloat(diskMassSlider.value)) + ' M_sun';
-    document.getElementById('disk-scale-value').textContent = parseFloat(diskScaleSlider.value).toFixed(1) + ' kpc';
+    document.getElementById('disk-scale-value').textContent = parseFloat(diskScaleSlider.value).toFixed(2) + ' kpc';
     document.getElementById('gas-mass-value').textContent = formatMassCompact(parseFloat(gasMassSlider.value)) + ' M_sun';
-    document.getElementById('gas-scale-value').textContent = parseFloat(gasScaleSlider.value).toFixed(1) + ' kpc';
+    document.getElementById('gas-scale-value').textContent = parseFloat(gasScaleSlider.value).toFixed(2) + ' kpc';
 
     const totalExp = Math.floor(Math.log10(total));
     const totalCoeff = total / Math.pow(10, totalExp);
     document.getElementById('mass-model-total-value').textContent =
-        totalCoeff.toFixed(1) + 'e' + totalExp + ' M_sun';
+        totalCoeff.toFixed(2) + 'e' + totalExp + ' M_sun';
 
     const logTotal = Math.log10(total);
     massSlider.value = logTotal;
 }
 
 // Update mass model display labels only (no side effects, for inference auto-scaling)
+function updateResetToPhotometricButton() {
+    var btn = document.getElementById('reset-to-photometric-btn');
+    if (!btn) return;
+    var inMassModelMode = !isAutoFitted;
+    btn.style.display = (massModelManuallyModified && inMassModelMode && currentExample && currentExample.id) ? '' : 'none';
+}
+
+function resetToPhotometric() {
+    if (!currentExample || !currentExample.id || !sandboxResult || !sandboxResult.photometric_mass_model) return;
+    setMassModelSliders(sandboxResult.photometric_mass_model);
+    massModelManuallyModified = false;
+    updateResetToPhotometricButton();
+    fetchPhotometricData(currentExample.id).then(function() {
+        var massModel = getMassModelFromSliders();
+        var predObs = pinnedObservations || [];
+        var predMaxR = parseFloat(distanceSlider.value);
+        if (predObs.length > 0) {
+            var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
+            predMaxR = Math.max(predMaxR, maxObsR * 1.15);
+        }
+        var gr = currentExample.galactic_radius ? parseFloat(currentExample.galactic_radius) : parseFloat(distanceSlider.value);
+        fetchRotationCurve(predMaxR, parseFloat(accelSlider.value), massModel, predObs, gr).then(function(data) {
+            var i, newtonianData = [], mondData = [], cdmData = [];
+            for (i = 0; i < (data.radii || []).length; i++) {
+                newtonianData.push({ x: data.radii[i], y: data.newtonian[i] });
+                mondData.push({ x: data.radii[i], y: data.mond[i] });
+                if (data.cdm) cdmData.push({ x: data.radii[i], y: data.cdm[i] });
+            }
+            chart.data.datasets[0].data = newtonianData;
+            chart.data.datasets[2].data = mondData;
+            chart.data.datasets[7].data = cdmData;
+            chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
+            chart.data.datasets[2].hidden = !isChipEnabled('mond');
+            chart.data.datasets[7].hidden = !isChipEnabled('cdm');
+            if (data.cdm_halo) lastCdmHalo = data.cdm_halo;
+            chart.update('none');
+        }).catch(function() {});
+    });
+}
+
 function updateMassModelDisplaysOnly() {
     const bm = Math.pow(10, parseFloat(bulgeMassSlider.value));
     const dm = Math.pow(10, parseFloat(diskMassSlider.value));
@@ -172,16 +224,16 @@ function updateMassModelDisplaysOnly() {
     const total = bm + dm + gm;
 
     document.getElementById('bulge-mass-value').textContent = formatMassCompact(parseFloat(bulgeMassSlider.value)) + ' M_sun';
-    document.getElementById('bulge-scale-value').textContent = parseFloat(bulgeScaleSlider.value).toFixed(1) + ' kpc';
+    document.getElementById('bulge-scale-value').textContent = parseFloat(bulgeScaleSlider.value).toFixed(2) + ' kpc';
     document.getElementById('disk-mass-value').textContent = formatMassCompact(parseFloat(diskMassSlider.value)) + ' M_sun';
-    document.getElementById('disk-scale-value').textContent = parseFloat(diskScaleSlider.value).toFixed(1) + ' kpc';
+    document.getElementById('disk-scale-value').textContent = parseFloat(diskScaleSlider.value).toFixed(2) + ' kpc';
     document.getElementById('gas-mass-value').textContent = formatMassCompact(parseFloat(gasMassSlider.value)) + ' M_sun';
-    document.getElementById('gas-scale-value').textContent = parseFloat(gasScaleSlider.value).toFixed(1) + ' kpc';
+    document.getElementById('gas-scale-value').textContent = parseFloat(gasScaleSlider.value).toFixed(2) + ' kpc';
 
     const totalExp = Math.floor(Math.log10(total));
     const totalCoeff = total / Math.pow(10, totalExp);
     document.getElementById('mass-model-total-value').textContent =
-        totalCoeff.toFixed(1) + 'e' + totalExp + ' M_sun';
+        totalCoeff.toFixed(2) + 'e' + totalExp + ' M_sun';
 }
 
 // Mass model slider listeners (always active)
@@ -189,17 +241,29 @@ function updateMassModelDisplaysOnly() {
 // In inference mode: scale length sliders control shape, masses are auto-computed
 [bulgeMassSlider, bulgeScaleSlider, diskMassSlider, diskScaleSlider, gasMassSlider, gasScaleSlider].forEach(slider => {
     slider.addEventListener('input', () => {
-        if (!isLoadingExample && currentExample) {
-            // User is fine-tuning: keep pinned observations visible but mark
-            // that we're no longer at the exact example configuration
-            currentExample = null;
-            // Don't reset the dropdown or pinned data -- observations stay
+        if (!isLoadingExample && currentExample && currentExample.id) {
+            massModelManuallyModified = true;
+            updateResetToPhotometricButton();
+            clearTimeout(manualGfdTimer);
+            manualGfdTimer = setTimeout(function() {
+                var mm = getMassModelFromSliders();
+                var maxR = parseFloat(distanceSlider.value);
+                if (pinnedObservations && pinnedObservations.length > 0) {
+                    var maxObsR = Math.max.apply(null, pinnedObservations.map(function(o) { return o.r; }));
+                    maxR = Math.max(maxR, maxObsR * 1.15);
+                }
+                fetchGfdFromMassModel(mm, maxR, parseFloat(accelSlider.value));
+            }, MANUAL_GFD_DEBOUNCE_MS);
         }
-        if (currentMode === 'prediction') {
-            updateMassModelDisplays();
+        // Reset to Mass Model mode when user manually adjusts sliders
+        if (isAutoFitted) {
+            isAutoFitted = false;
+            document.getElementById('observation-mass-panel').style.display = 'none';
+            document.getElementById('mass-model-panel').style.display = '';
+            resetViewModeToggle();
+            hideAutoMapDiagnostics();
         }
-        // In inference mode, scale length changes trigger re-inference
-        // which will auto-update the mass values
+        updateMassModelDisplays();
         debouncedUpdateChart();
     });
 });
@@ -209,6 +273,14 @@ function updateMassModelDisplaysOnly() {
 galacticRadiusSlider.addEventListener('input', () => {
     galacticRadiusValue.textContent = galacticRadiusSlider.value + ' kpc';
     debouncedUpdateChart();
+});
+
+// Gravity Lens Throughput slider: controls the +/- band width around
+// the GFD curve. Default 6.2% from (4/pi)^(1/4) topological constraint.
+lensSlider.addEventListener('input', () => {
+    var pct = parseFloat(lensSlider.value);
+    lensValue.textContent = '+/- ' + pct.toFixed(1) + '%';
+    updateLensBand();
 });
 
 // Origin Throughput slider listener: modulates the GFD-sigma structural
@@ -221,18 +293,62 @@ vortexStrengthSlider.addEventListener('input', () => {
     debouncedUpdateChart();
 });
 
-// Auto button: switch back to auto mode
+// Auto button: switch back to auto mode (triggers re-fetch which
+// will run GA when observations are available)
 vortexAutoBtn.addEventListener('click', () => {
     isAutoThroughput = true;
+    inferenceNeeded = false;
     vortexAutoBtn.classList.add('active');
     if (autoVortexStrength !== null) {
         vortexStrengthSlider.value = autoVortexStrength;
-        vortexStrengthValue.textContent = autoVortexStrength.toFixed(2);
+        vortexStrengthValue.textContent = 'auto';
     } else {
         vortexStrengthValue.textContent = 'auto';
     }
     debouncedUpdateChart();
 });
+
+/**
+ * Sync the Origin Throughput slider and mass displays from an API
+ * response. When the two-stage GA ran, updates the throughput slider
+ * with the fitted value and adjusts mass sliders to reflect the
+ * GA-optimized mass scale.
+ */
+function syncThroughputFromResponse(data) {
+    if (data.auto_origin_throughput !== undefined) {
+        autoVortexStrength = data.auto_origin_throughput;
+        if (isAutoThroughput) {
+            vortexStrengthSlider.value = autoVortexStrength;
+            var label = autoVortexStrength.toFixed(2);
+            if (data.throughput_fit && data.throughput_fit.method) {
+                var m = data.throughput_fit.method;
+                if (m === 'inference') {
+                    label += ' (origin inferred)';
+                } else if (m === 'two_stage_ga') {
+                    label += ' (fit)';
+                }
+            }
+            vortexStrengthValue.textContent = label;
+        }
+    }
+    // When inference optimized the mass model, sync all sliders
+    if (data.optimized_mass_model && isAutoThroughput) {
+        var om = data.optimized_mass_model;
+        if (om.bulge && om.bulge.M > 0) {
+            bulgeMassSlider.value = Math.log10(Math.max(om.bulge.M, 1e7));
+            if (om.bulge.a > 0) bulgeScaleSlider.value = om.bulge.a;
+        }
+        if (om.disk && om.disk.M > 0) {
+            diskMassSlider.value = Math.log10(Math.max(om.disk.M, 1e7));
+            if (om.disk.Rd > 0) diskScaleSlider.value = om.disk.Rd;
+        }
+        if (om.gas && om.gas.M > 0) {
+            gasMassSlider.value = Math.log10(Math.max(om.gas.M, 1e7));
+            if (om.gas.Rd > 0) gasScaleSlider.value = om.gas.Rd;
+        }
+        updateMassModelDisplaysOnly();
+    }
+}
 
 // =====================================================================
 // ERROR BAR PLUGIN
@@ -283,37 +399,45 @@ Chart.register(errorBarPlugin);
 var fieldOriginBoundaryPlugin = {
     id: 'fieldOriginBoundary',
     afterDraw: function(chartInstance) {
-        var rEnv = getGalacticRadius();
-        if (!rEnv) return;
-        var rThroat = 0.30 * rEnv;
+        return;  // R_t line hidden for now (off observational band graph)
+
+        var rThroat;
+        var label;
+        var fg = sandboxResult ? sandboxResult.field_geometry : null;
+        if (fg && fg.throat_radius_kpc != null) {
+            rThroat = fg.throat_radius_kpc;
+            label = 'R_t = ' + rThroat.toFixed(1) + ' kpc';
+        } else if (inferredFieldGeometry
+            && inferredFieldGeometry.throat_radius_kpc != null) {
+            rThroat = inferredFieldGeometry.throat_radius_kpc;
+            label = 'R_t = ' + rThroat.toFixed(1) + ' kpc';
+        } else {
+            var rEnv = getGalacticRadius();
+            if (!rEnv) return;
+            rThroat = THROAT_FRAC * rEnv;
+            label = 'R_t = ' + rThroat.toFixed(1) + ' kpc';
+        }
 
         var xScale = chartInstance.scales.x;
         var yAxis = chartInstance.scales.y;
         if (!xScale || !yAxis) return;
-
-        // Only draw if R_t is within the visible x range
         if (rThroat < xScale.min || rThroat > xScale.max) return;
 
         var xPixel = xScale.getPixelForValue(rThroat);
         var ctx = chartInstance.ctx;
         ctx.save();
-
-        // Dashed vertical line
         ctx.beginPath();
         ctx.setLineDash([6, 4]);
         ctx.moveTo(xPixel, yAxis.top);
         ctx.lineTo(xPixel, yAxis.bottom);
         ctx.lineWidth = 1.5;
-        ctx.strokeStyle = 'rgba(118, 255, 3, 0.45)';
+        ctx.strokeStyle = '#00ff88';
         ctx.stroke();
         ctx.setLineDash([]);
-
-        // Label at the top
         ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(118, 255, 3, 0.7)';
+        ctx.fillStyle = '#00ff88';
         ctx.textAlign = 'center';
-        ctx.fillText('Field Origin ' + rThroat.toFixed(1) + ' kpc', xPixel, yAxis.top - 6);
-
+        ctx.fillText(label, xPixel, yAxis.top - 6);
         ctx.restore();
     }
 };
@@ -328,43 +452,127 @@ Chart.register(fieldOriginBoundaryPlugin);
 var fieldHorizonPlugin = {
     id: 'fieldHorizon',
     afterDraw: function(chartInstance) {
-        var rEnv = getGalacticRadius();
-        if (!rEnv) return;
+        return;  // R_env line hidden for now (off chart in both mass model and observational)
+        var rEnv;
+        var label;
+        var fg = sandboxResult ? sandboxResult.field_geometry : null;
+        if (fg && fg.envelope_radius_kpc != null) {
+            rEnv = fg.envelope_radius_kpc;
+            label = 'R_env = ' + rEnv.toFixed(1) + ' kpc';
+        } else if (isAutoFitted && inferredFieldGeometry
+            && inferredFieldGeometry.envelope_radius_kpc != null) {
+            rEnv = inferredFieldGeometry.envelope_radius_kpc;
+            label = 'R_env = ' + rEnv.toFixed(1) + ' kpc';
+        } else {
+            rEnv = getGalacticRadius();
+            if (!rEnv) return;
+            label = 'R_env = ' + rEnv.toFixed(1) + ' kpc';
+        }
 
         var xScale = chartInstance.scales.x;
         var yAxis = chartInstance.scales.y;
         if (!xScale || !yAxis) return;
-
-        // Only draw if R_env is within the visible x range
         if (rEnv < xScale.min || rEnv > xScale.max) return;
 
         var xPixel = xScale.getPixelForValue(rEnv);
         var ctx = chartInstance.ctx;
         ctx.save();
-
-        // Dashed vertical line
         ctx.beginPath();
         ctx.setLineDash([6, 4]);
         ctx.moveTo(xPixel, yAxis.top);
         ctx.lineTo(xPixel, yAxis.bottom);
         ctx.lineWidth = 1.5;
-        ctx.strokeStyle = 'rgba(255, 107, 107, 0.45)';
+        ctx.strokeStyle = '#ff6688';
         ctx.stroke();
         ctx.setLineDash([]);
-
-        // Label at the top
         ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255, 107, 107, 0.7)';
+        ctx.fillStyle = '#ff6688';
         ctx.textAlign = 'center';
-        ctx.fillText('Field Horizon ' + rEnv.toFixed(1) + ' kpc', xPixel, yAxis.top - 6);
-
+        ctx.fillText(label, xPixel, yAxis.top - 6);
         ctx.restore();
     }
 };
 Chart.register(fieldHorizonPlugin);
 
 // =====================================================================
-// CHART INITIALIZATION
+// SPARC R_HI PLUGIN
+// =====================================================================
+// Draws a vertical dotted line at the SPARC catalog R_HI (galactic_radius)
+// to mark the observed HI extent from 21cm radio surveys.
+
+var sparcRhiPlugin = {
+    id: 'sparcRhi',
+    afterDraw: function(chartInstance) {
+        var rHi = sandboxResult ? sandboxResult.sparc_r_hi_kpc : null;
+        if (!rHi || rHi <= 0) return;
+
+        var xScale = chartInstance.scales.x;
+        var yAxis = chartInstance.scales.y;
+        if (!xScale || !yAxis) return;
+        if (rHi < xScale.min || rHi > xScale.max) return;
+
+        var xPixel = xScale.getPixelForValue(rHi);
+        var ctx = chartInstance.ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.setLineDash([3, 3]);
+        ctx.moveTo(xPixel, yAxis.top);
+        ctx.lineTo(xPixel, yAxis.bottom);
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = '#ffaa44';
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = '#ffaa44';
+        ctx.textAlign = 'center';
+        ctx.fillText('R_HI = ' + rHi.toFixed(1) + ' kpc', xPixel, yAxis.top - 6);
+        ctx.restore();
+    }
+};
+Chart.register(sparcRhiPlugin);
+
+// =====================================================================
+// R_VIS BAND PLUGIN
+// =====================================================================
+// Draws a shaded vertical band showing the baryonic extent (90% to
+// 99.5% enclosed mass) from the sandbox field geometry.
+
+var rVisBandPlugin = {
+    id: 'rVisBand',
+    beforeDraw: function(chartInstance) {
+        return;  // Purple baryonic band hidden for now (off observational band graph)
+        var fg = sandboxResult ? sandboxResult.field_geometry : null;
+        if (!fg) return;
+        var r90 = fg.visible_radius_90_kpc || 0;
+        var r99 = fg.visible_radius_99_kpc || 0;
+        if (r90 <= 0 || r99 <= 0) return;
+
+        var xScale = chartInstance.scales.x;
+        var yAxis = chartInstance.scales.y;
+        if (!xScale || !yAxis) return;
+
+        var x1 = xScale.getPixelForValue(r90);
+        var x2 = xScale.getPixelForValue(r99);
+        if (x2 < xScale.left || x1 > xScale.right) return;
+        var left = Math.max(x1, xScale.left);
+        var right = Math.min(x2, xScale.right);
+
+        var ctx = chartInstance.ctx;
+        ctx.save();
+        ctx.fillStyle = 'rgba(170,136,255,0.12)';
+        ctx.fillRect(left, yAxis.top, right - left, yAxis.bottom - yAxis.top);
+        ctx.fillStyle = '#aa88ff';
+        ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(
+            'Baryonic extent (' + r90.toFixed(0) + ' to ' + r99.toFixed(0) + ' kpc)',
+            (left + right) / 2,
+            yAxis.top - 6);
+        ctx.restore();
+    }
+};
+Chart.register(rVisBandPlugin);
+
 // =====================================================================
 
 // ---- External HTML tooltip handler ----
@@ -431,7 +639,7 @@ function buildInferenceTooltip(dp) {
     var cdmV = interpolateCurve(7, r);
     var gfdSymV2 = interpolateCurve(9, r);
     if (gfdSymV2 !== null && chart.data.datasets[9].data.length > 0) {
-        html += ttRow('<span style="color:#00E5FF;">\u25CF</span> GFD\u03C3', gfdSymV2.toFixed(1) + ' km/s', '#00E5FF');
+        html += ttRow('<span style="color:#00E5FF;">\u25CF</span> GFD (Observed)', gfdSymV2.toFixed(1) + ' km/s', '#00E5FF');
     }
     if (newtonV !== null) {
         html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s', '#ef5350');
@@ -540,7 +748,7 @@ function buildObservedTooltip(dp) {
     if (gfdV !== null)    html += ttRow('<span style="color:#4da6ff;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s' + fmtDelta(gfdV), '#4da6ff');
     var gfdSymV = interpolateCurve(9, r);
     if (gfdSymV !== null && chart.data.datasets[9].data.length > 0) {
-        html += ttRow('<span style="color:#00E5FF;">\u25CF</span> GFD\u03C3', gfdSymV.toFixed(1) + ' km/s' + fmtDelta(gfdSymV), '#00E5FF');
+        html += ttRow('<span style="color:#00E5FF;">\u25CF</span> GFD (Observed)', gfdSymV.toFixed(1) + ' km/s' + fmtDelta(gfdSymV), '#00E5FF');
     }
     if (newtonV !== null) html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s' + fmtDelta(newtonV), '#ef5350');
     if (mondV !== null)   html += ttRow('<span style="color:#ab47bc;">\u25CF</span> MOND', mondV.toFixed(1) + ' km/s' + fmtDelta(mondV), '#ab47bc');
@@ -715,7 +923,8 @@ const chart = new Chart(ctx, {
                 backgroundColor: 'rgba(255, 107, 107, 0.1)',
                 borderWidth: 2.5,
                 tension: 0.4,
-                pointRadius: 0
+                pointRadius: 0,
+                hidden: true
             },
             {
                 label: 'Gravity Field Dynamics (Dual Tetrad)',
@@ -733,7 +942,8 @@ const chart = new Chart(ctx, {
                 backgroundColor: 'rgba(153, 102, 255, 0.1)',
                 borderWidth: 2.5,
                 tension: 0.4,
-                pointRadius: 0
+                pointRadius: 0,
+                hidden: true
             },
             {
                 label: 'Observed Data',
@@ -749,19 +959,19 @@ const chart = new Chart(ctx, {
             {
                 label: 'GFD envelope upper',
                 data: [],
-                borderColor: 'rgba(118, 255, 3, 0.30)',
-                backgroundColor: 'rgba(118, 255, 3, 0.10)',
+                borderColor: 'rgba(77, 166, 255, 0.25)',
+                backgroundColor: 'rgba(77, 166, 255, 0.08)',
                 borderWidth: 1,
                 borderDash: [4, 4],
                 tension: 0.4,
                 pointRadius: 0,
-                fill: {target: 5, above: 'rgba(118, 255, 3, 0.10)', below: 'rgba(118, 255, 3, 0.10)'}
+                fill: {target: 5, above: 'rgba(77, 166, 255, 0.08)', below: 'rgba(77, 166, 255, 0.08)'}
             },
             // Dataset 5: GFD/GFD-sigma envelope lower edge (hidden from legend)
             {
                 label: 'GFD envelope lower',
                 data: [],
-                borderColor: 'rgba(118, 255, 3, 0.30)',
+                borderColor: 'rgba(77, 166, 255, 0.25)',
                 backgroundColor: 'transparent',
                 borderWidth: 1,
                 borderDash: [4, 4],
@@ -771,7 +981,7 @@ const chart = new Chart(ctx, {
             },
             // Dataset 6: Inference markers (green diamonds)
             {
-                label: 'GFD Inference',
+                label: 'GFD Auto Fit',
                 data: [],
                 borderColor: '#4caf50',
                 backgroundColor: 'rgba(76, 175, 80, 0.7)',
@@ -789,7 +999,8 @@ const chart = new Chart(ctx, {
                 borderWidth: 2,
                 borderDash: [8, 4],
                 tension: 0.4,
-                pointRadius: 0
+                pointRadius: 0,
+                hidden: true
             },
             // Dataset 8: GFD\u03C6 (covariant + gas-fraction-scaled structural release)
             {
@@ -801,13 +1012,38 @@ const chart = new Chart(ctx, {
                 tension: 0.4,
                 pointRadius: 0
             },
-            // Dataset 9: GFD\u03C3 (Origin Throughput: vortex reflection through R_t)
+            // Dataset 9: GFD (Observed) -- GFD mapped to observations via Origin Throughput.
+            // Hidden by default; revealed only after auto-map completes.
             {
-                label: 'GFD\u03C3',
+                label: 'GFD (Observed)',
                 data: [],
                 borderColor: '#00E5FF',
                 backgroundColor: 'rgba(0, 229, 255, 0.08)',
                 borderWidth: 2.5,
+                tension: 0.4,
+                pointRadius: 0,
+                hidden: true
+            },
+            // Dataset 10: GFD (Observed) curve from observation fit
+            {
+                label: 'GFD (Observed)',
+                data: [],
+                borderColor: '#ff44dd',
+                backgroundColor: 'transparent',
+                borderWidth: 2.5,
+                cubicInterpolationMode: 'monotone',
+                tension: 0.4,
+                pointRadius: 0,
+                hidden: true
+            },
+            // Dataset 11: GFD (Observed)
+            {
+                label: 'GFD (Observed)',
+                data: [],
+                borderColor: '#aa44ff',
+                backgroundColor: 'transparent',
+                borderWidth: 2.5,
+                cubicInterpolationMode: 'monotone',
                 tension: 0.4,
                 pointRadius: 0
             }
@@ -816,6 +1052,7 @@ const chart = new Chart(ctx, {
     options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: false,
         layout: {
             padding: { top: 16 }
         },
@@ -843,9 +1080,10 @@ const chart = new Chart(ctx, {
                     enabled: true,
                     mode: 'x',
                     modifierKey: 'shift',
-                    onPanComplete: ({chart}) => {
+                    onPanComplete: ({chart: ch}) => {
                         const resetBtn = document.getElementById('reset-zoom-btn');
                         if (resetBtn) resetBtn.style.display = 'block';
+                        syncVpsXAxis();
                     }
                 },
                 zoom: {
@@ -858,9 +1096,10 @@ const chart = new Chart(ctx, {
                         borderWidth: 2
                     },
                     mode: 'x',
-                    onZoomComplete: ({chart}) => {
+                    onZoomComplete: ({chart: ch}) => {
                         const resetBtn = document.getElementById('reset-zoom-btn');
                         if (resetBtn) resetBtn.style.display = 'block';
+                        syncVpsXAxis();
                     }
                 },
                 limits: { x: {min: 0, max: 100} }
@@ -879,6 +1118,7 @@ const chart = new Chart(ctx, {
                 ticks: { color: '#b0b0b0', maxTicksLimit: 10 }
             },
             y: {
+                afterFit: function(scale) { scale.width = CHART_Y_AXIS_LEFT_WIDTH; },
                 title: {
                     display: true,
                     text: 'Circular Velocity v(r) [km/s]',
@@ -925,13 +1165,314 @@ function hideResetButton() { resetZoomBtn.style.display = 'none'; }
 function resetChartZoom() { chart.resetZoom(); hideResetButton(); }
 
 resetZoomBtn.addEventListener('click', resetChartZoom);
+
+// Fixed y-axis width for consistent layout.
+var CHART_Y_AXIS_LEFT_WIDTH = 80;
+
+// VPS panel: mirror of main chart + histogram drawn as line vertical segments (like observation error bars).
+var vpsChart = null;
+
+function getVpsDeltaVData() {
+    var src = (photometricResult && photometricResult.chart) || (sandboxResult && sandboxResult.chart);
+    if (!src || !src.radii) return [];
+    var radii = src.radii;
+    var accel = src.gfd_accel || [];
+    var photo = src.gfd_photometric || [];
+    var out = [];
+    for (var i = 0; i < radii.length; i++) {
+        var a = accel[i] != null ? accel[i] : 0;
+        var p = photo[i] != null ? photo[i] : 0;
+        out.push({ x: radii[i], y: a - p });
+    }
+    return out;
+}
+
+function getVpsHistogramLineData() {
+    var points = getVpsDeltaVData();
+    var boost = [];
+    var suppress = [];
+    for (var i = 0; i < points.length; i++) {
+        if (i === 0) continue;
+        var r = points[i].x;
+        var y = points[i].y;
+        var seg = [{ x: r, y: 0 }, { x: r, y: y }, { x: r, y: 0 }];
+        if (y >= 0) {
+            boost.push(seg[0], seg[1], seg[2]);
+        } else {
+            suppress.push(seg[0], seg[1], seg[2]);
+        }
+    }
+    return { boost: boost, suppress: suppress };
+}
+
+function ensureVpsChart() {
+    if (vpsChart) return vpsChart;
+    var canvas = document.getElementById('vpsChart');
+    if (!canvas) return null;
+    var ctx = canvas.getContext('2d');
+    var datasets = [];
+    for (var i = 0; i < chart.data.datasets.length; i++) {
+        var d = chart.data.datasets[i];
+        datasets.push({
+            label: d.label,
+            data: [],
+            borderColor: d.borderColor,
+            backgroundColor: d.backgroundColor,
+            borderWidth: d.borderWidth,
+            tension: d.tension != null ? d.tension : 0.4,
+            pointRadius: d.pointRadius != null ? d.pointRadius : 0,
+            hidden: d.hidden,
+            borderDash: d.borderDash,
+            cubicInterpolationMode: d.cubicInterpolationMode,
+            showLine: d.showLine,
+            pointStyle: d.pointStyle,
+            fill: d.fill
+        });
+    }
+    datasets.push({
+        label: 'delta v (boost)',
+        data: [],
+        borderColor: 'rgba(0, 229, 160, 0.9)',
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        tension: 0,
+        pointRadius: 0,
+        fill: false
+    });
+    datasets.push({
+        label: 'delta v (suppress)',
+        data: [],
+        borderColor: 'rgba(255, 68, 221, 0.9)',
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        tension: 0,
+        pointRadius: 0,
+        fill: false
+    });
+    vpsChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            layout: { padding: { top: 16 } },
+            plugins: {
+                legend: { display: false },
+                title: { display: false },
+                tooltip: { enabled: false },
+                zoom: { zoom: { enabled: false }, pan: { enabled: false } }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: { display: false },
+                    grid: { color: 'rgba(64, 64, 64, 0.3)' },
+                    ticks: { color: '#b0b0b0', maxTicksLimit: 10 }
+                },
+                y: {
+                    afterFit: function(scale) { scale.width = CHART_Y_AXIS_LEFT_WIDTH; },
+                    type: 'linear',
+                    title: {
+                        display: true,
+                        text: 'Circular Velocity v(r) [km/s]',
+                        color: '#b0b0b0',
+                        font: { size: 13, weight: '500' }
+                    },
+                    grid: { color: 'rgba(64, 64, 64, 0.3)' },
+                    ticks: { color: '#b0b0b0' },
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+    return vpsChart;
+}
+
+function copyMainChartToVps() {
+    if (!vpsChart || !chart) return;
+    for (var i = 0; i < chart.data.datasets.length && i < vpsChart.data.datasets.length; i++) {
+        vpsChart.data.datasets[i].data = chart.data.datasets[i].data;
+        vpsChart.data.datasets[i].hidden = true;
+        vpsChart.data.datasets[i].label = chart.data.datasets[i].label;
+    }
+    var hist = getVpsHistogramLineData();
+    if (vpsChart.data.datasets[12]) vpsChart.data.datasets[12].data = hist.boost;
+    if (vpsChart.data.datasets[13]) vpsChart.data.datasets[13].data = hist.suppress;
+    if (chart.options.scales && chart.options.scales.x) {
+        vpsChart.options.scales.x.min = chart.options.scales.x.min;
+        vpsChart.options.scales.x.max = chart.options.scales.x.max;
+    }
+    var points = getVpsDeltaVData();
+    var maxAbs = 1;
+    for (var j = 0; j < points.length; j++) {
+        var ay = Math.abs(points[j].y);
+        if (ay > maxAbs) maxAbs = ay;
+    }
+    vpsChart.options.scales.y.min = -maxAbs;
+    vpsChart.options.scales.y.max = maxAbs;
+    vpsChart.options.scales.y.title.display = true;
+    vpsChart.options.scales.y.title.text = 'delta v (km/s)';
+    vpsChart.update('none');
+}
+
+function updateVpsChart() {
+    if (!isAutoFitted) return;
+    var panel = document.getElementById('vps-panel');
+    if (!panel || panel.style.display === 'none') return;
+    ensureVpsChart();
+    if (!vpsChart) return;
+    copyMainChartToVps();
+}
+
+function syncVpsXAxis() {
+    if (!vpsChart || !chart) return;
+    copyMainChartToVps();
+}
 canvas.addEventListener('dblclick', resetChartZoom);
+
+// =====================================================================
+// RIGHT PANEL: SCIENTIFIC METRICS (server-computed)
+// =====================================================================
+
+var lastApiMetrics = null;  // cached metrics from last API response
+
+/**
+ * Update all right panel sections from server-provided metrics.
+ * Falls back to '--' when no metrics are available.
+ */
+function updateRightPanel(apiData) {
+    var m = (apiData && apiData.metrics) ? apiData.metrics : lastApiMetrics;
+    if (apiData && apiData.metrics) {
+        lastApiMetrics = apiData.metrics;
+    }
+
+    // --- Fit Quality ---
+    var fit = m ? m.fit_quality : null;
+    if (fit) {
+        document.getElementById('metric-rms').textContent = fit.rms_km_s + ' km/s';
+        var chi2El = document.getElementById('metric-chi2');
+        chi2El.textContent = fit.chi2_reduced.toFixed(2);
+        chi2El.className = 'metrics-value' + (fit.chi2_reduced <= 1.5 ? ' good' : fit.chi2_reduced <= 3 ? ' warn' : ' bad');
+        document.getElementById('metric-hits-1s').textContent = fit.within_1sigma + '/' + fit.n_obs;
+        document.getElementById('metric-hits-2s').textContent = fit.within_2sigma + '/' + fit.n_obs;
+    } else {
+        document.getElementById('metric-rms').textContent = '--';
+        document.getElementById('metric-chi2').textContent = '--';
+        document.getElementById('metric-chi2').className = 'metrics-value';
+        document.getElementById('metric-hits-1s').textContent = '--';
+        document.getElementById('metric-hits-2s').textContent = '--';
+    }
+
+    // --- Observation Summary ---
+    var obs = m ? m.observation_summary : null;
+    if (obs) {
+        document.getElementById('metric-npoints').textContent = obs.n_points;
+        document.getElementById('metric-radial-range').textContent = obs.r_min_kpc.toFixed(1) + ' - ' + obs.r_max_kpc.toFixed(1) + ' kpc';
+        document.getElementById('metric-mean-err').textContent = obs.mean_error_km_s > 0 ? ('+/-' + obs.mean_error_km_s + ' km/s') : '--';
+    } else {
+        document.getElementById('metric-npoints').textContent = '--';
+        document.getElementById('metric-radial-range').textContent = '--';
+        document.getElementById('metric-mean-err').textContent = '--';
+    }
+
+    // --- Mass Model ---
+    var mm = m ? m.mass_model : null;
+    if (mm) {
+        var totalExp = Math.floor(Math.log10(mm.total_baryonic_M_sun));
+        var totalCoeff = mm.total_baryonic_M_sun / Math.pow(10, totalExp);
+        document.getElementById('metric-total-mass').textContent = totalCoeff.toFixed(2) + 'e' + totalExp + ' M_sun';
+        document.getElementById('metric-gas-frac').textContent = mm.gas_fraction_pct + '%';
+
+        // Use inference-predicted field geometry when available (observation mode)
+        var fg = inferredFieldGeometry;
+        if (isAutoFitted && fg && fg.throat_radius_kpc !== null) {
+            var rt = fg.throat_radius_kpc;
+            var re = fg.envelope_radius_kpc;
+            var rtCat = mm.field_origin_kpc;
+            var reCat = mm.field_horizon_kpc;
+            var rtDelta = rtCat > 0 ? ((rt - rtCat) / rtCat * 100).toFixed(1) : '0.0';
+            var reDelta = reCat > 0 ? ((re - reCat) / reCat * 100).toFixed(1) : '0.0';
+            document.getElementById('metric-field-origin').textContent =
+                rt.toFixed(1) + ' kpc (' + (rtDelta >= 0 ? '+' : '') + rtDelta + '%)';
+            document.getElementById('metric-field-horizon').textContent =
+                re.toFixed(1) + ' kpc (' + (reDelta >= 0 ? '+' : '') + reDelta + '%)';
+        } else {
+            document.getElementById('metric-field-origin').textContent = mm.field_origin_kpc + ' kpc';
+            document.getElementById('metric-field-horizon').textContent = mm.field_horizon_kpc + ' kpc';
+        }
+    } else {
+        document.getElementById('metric-total-mass').textContent = '--';
+        document.getElementById('metric-gas-frac').textContent = '--';
+        document.getElementById('metric-field-origin').textContent = '--';
+        document.getElementById('metric-field-horizon').textContent = '--';
+    }
+
+    // --- CDM Comparison ---
+    if (lastCdmHalo) {
+        var h = lastCdmHalo;
+        var m200Exp = Math.floor(Math.log10(h.m200));
+        var m200Coeff = h.m200 / Math.pow(10, m200Exp);
+        document.getElementById('metric-cdm-m200').textContent = m200Coeff.toFixed(2) + 'e' + m200Exp + ' M_sun';
+        document.getElementById('metric-cdm-c').textContent = h.c.toFixed(1);
+        document.getElementById('metric-cdm-r200').textContent = h.r200_kpc ? (h.r200_kpc.toFixed(1) + ' kpc') : '--';
+        document.getElementById('metric-cdm-method').textContent = h.method === 'chi-squared fit to observations'
+            ? 'Chi-sq fit' : 'Abundance matching';
+        document.getElementById('metric-cdm-params').textContent = (h.n_params_total || 2) + ' (NFW)';
+    } else {
+        document.getElementById('metric-cdm-m200').textContent = '--';
+        document.getElementById('metric-cdm-c').textContent = '--';
+        document.getElementById('metric-cdm-r200').textContent = '--';
+        document.getElementById('metric-cdm-method').textContent = '--';
+        document.getElementById('metric-cdm-params').textContent = '--';
+    }
+
+    // --- Residuals Table ---
+    var residuals = m ? m.residuals : [];
+    var tbody = document.getElementById('metrics-residuals-tbody');
+    if (tbody) {
+        var html = '';
+        for (var i = 0; i < residuals.length; i++) {
+            var row = residuals[i];
+            var cls = '';
+            if (row.sigma !== null) {
+                cls = row.sigma <= 1.0 ? 'sigma-good' : row.sigma <= 2.0 ? 'sigma-warn' : 'sigma-bad';
+            }
+            html += '<tr class="' + cls + '">'
+                + '<td>' + row.r_kpc.toFixed(1) + '</td>'
+                + '<td>' + row.v_obs.toFixed(1) + '</td>'
+                + '<td>' + row.v_gfd.toFixed(1) + '</td>'
+                + '<td>' + row.delta_v.toFixed(1) + '</td>'
+                + '<td>' + (row.sigma !== null ? row.sigma.toFixed(1) : '--') + '</td>'
+                + '</tr>';
+        }
+        tbody.innerHTML = html;
+    }
+}
+
+/**
+ * Toggle a collapsible metrics section open/closed.
+ */
+function toggleMetricsSection(headerEl) {
+    var section = headerEl.parentElement;
+    var body = headerEl.nextElementSibling;
+    var chevron = headerEl.querySelector('.metrics-chevron');
+    if (body.style.display === 'none') {
+        body.style.display = '';
+        chevron.innerHTML = '&#9660;';
+        section.classList.remove('collapsed');
+    } else {
+        body.style.display = 'none';
+        chevron.innerHTML = '&#9654;';
+        section.classList.add('collapsed');
+    }
+}
 
 // =====================================================================
 // API COMMUNICATION
 // =====================================================================
 
-async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations, galacticRadius) {
+function _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius) {
     var body = {
         max_radius: maxRadius,
         num_points: 100,
@@ -941,17 +1482,30 @@ async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations
     if (observations) {
         body.observations = observations;
     }
-    // Galactic radius (gravitational horizon) for manifold computation.
-    // Falls back to max_radius on the backend if not provided.
     if (galacticRadius) {
         body.galactic_radius = galacticRadius;
     }
-    // Origin Throughput: only send explicit value when user has overridden.
-    // When isAutoThroughput is true, omit so the backend uses its own auto value.
+    // Origin Throughput: send explicit value when user has overridden.
     if (!isAutoThroughput && vortexStrengthSlider) {
         body.vortex_strength = parseFloat(vortexStrengthSlider.value);
     }
+    return body;
+}
+
+async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations, galacticRadius) {
+    var body = _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius);
     const resp = await fetch('/api/rotation/curve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error('API error: ' + resp.status);
+    return resp.json();
+}
+
+async function fetchInferRotationCurve(maxRadius, accelRatio, massModel, observations, galacticRadius) {
+    var body = _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius);
+    const resp = await fetch('/api/rotation/infer-curve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -993,6 +1547,432 @@ async function fetchMultiPointInference(observations, accelRatio, massModel) {
     });
     if (!resp.ok) return null;
     return resp.json();
+}
+
+function showChartLoading() {
+    var overlay = document.getElementById('chart-loading-overlay');
+    if (overlay) overlay.style.display = 'flex';
+}
+
+function hideChartLoading() {
+    var overlay = document.getElementById('chart-loading-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+let observationFetchPromise = null;
+
+async function fetchPhotometricData(galaxyId) {
+    try {
+        const resp = await fetch('/api/sandbox/photometric', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                galaxy_id: galaxyId,
+                num_points: 500,
+                mode: 'mass_model'
+            })
+        });
+        if (!resp.ok) { sandboxResult = null; photometricResult = null; return; }
+        sandboxResult = await resp.json();
+        sandboxResult.gfd_source = 'photometric';
+        photometricResult = sandboxResult;
+        renderSandboxCurves();
+        updatePhotometricPanel();
+        updateDiagnosticsPanel();
+        blankRightPaneMetrics();
+
+        // Prefetch observation curves (sigma + accel) in background
+        observationFetchPromise = fetchObservationData(galaxyId);
+    } catch (e) {
+        sandboxResult = null;
+        photometricResult = null;
+    }
+}
+
+/**
+ * Fetch GFD curve from manually set mass model (slider values).
+ * Same API as photometric but mode 'manual' and mass_model in body.
+ * Used when user has changed mass sliders after loading an example.
+ */
+async function fetchGfdFromMassModel(massModel, maxRadius, accelRatio) {
+    try {
+        const resp = await fetch('/api/sandbox/photometric', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mode: 'manual',
+                mass_model: massModel,
+                num_points: 500,
+                max_radius: maxRadius,
+                accel_ratio: accelRatio
+            })
+        });
+        if (!resp.ok) return;
+        var result = await resp.json();
+        if (!sandboxResult) return;
+        sandboxResult = {
+            chart: result.chart,
+            field_geometry: result.field_geometry,
+            sparc_r_hi_kpc: sandboxResult.sparc_r_hi_kpc,
+            photometric_mass_model: sandboxResult.photometric_mass_model,
+            gfd_source: 'manual'
+        };
+        renderSandboxCurves();
+    } catch (e) {
+        console.error('Manual GFD fetch error:', e);
+    }
+}
+
+async function fetchObservationData(galaxyId) {
+    try {
+        const resp = await fetch('/api/sandbox/photometric', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                galaxy_id: galaxyId,
+                num_points: 500,
+                mode: 'observations'
+            })
+        });
+        if (!resp.ok) return;
+        var result = await resp.json();
+        if (result.chart && result.chart.gfd_spline) {
+            photometricResult.chart.gfd_spline = result.chart.gfd_spline;
+            photometricResult.chart.gfd_covariant_spline =
+                result.chart.gfd_covariant_spline;
+            photometricResult.chart.delta_v2_spline =
+                result.chart.delta_v2_spline;
+        }
+        if (result.chart && result.chart.gfd_accel) {
+            photometricResult.chart.gfd_accel = result.chart.gfd_accel;
+        }
+        if (result.vortex_signal_spline) {
+            photometricResult.vortex_signal_spline =
+                result.vortex_signal_spline;
+        }
+        if (result.accel_ratio_fitted != null) {
+            photometricResult.accel_ratio_fitted =
+                result.accel_ratio_fitted;
+        }
+        if (isAutoFitted) {
+            sandboxResult = result;
+            renderSandboxCurves();
+        } else {
+            updateObservationCurvesOnly();
+        }
+        updateDiagnosticsPanel();
+    } catch (e) {
+        console.error('Observation data fetch error:', e);
+    }
+}
+
+// fetchSandboxData: DISABLED (slow Bayesian endpoint, 9-12s).
+// Replaced by fetchPhotometricData which includes fast GFD Sigma
+// and GFD (with acceleration) from the photometric endpoint.
+// Kept for reference; remove when no longer needed.
+//
+// async function fetchSandboxData(galaxyId) {
+//     try {
+//         const resp = await fetch('/api/sandbox/map_gfd_with_bayesian', {
+//             method: 'POST',
+//             headers: { 'Content-Type': 'application/json' },
+//             body: JSON.stringify({
+//                 galaxy_id: galaxyId,
+//                 num_points: 500
+//             })
+//         });
+//         if (!resp.ok) { return; }
+//         sandboxResult = await resp.json();
+//         renderSandboxCurves();
+//         updatePhotometricPanel();
+//         updateDiagnosticsPanel();
+//     } catch (e) {
+//         console.error('Sandbox fetch error:', e);
+//     }
+// }
+
+// =====================================================================
+// SANDBOX RENDERING: photometric + sigma curves from sandbox API
+// =====================================================================
+
+/**
+ * Update only the observation-derived curve data (GFD Sigma, GFD Accel)
+ * without changing scales or sandboxResult. Used when observation data
+ * arrives in the background while the user is in mass model mode, so the
+ * chart does not rezoom or rescale.
+ */
+function updateObservationCurvesOnly() {
+    if (!photometricResult || !photometricResult.chart) return;
+    var xMax = chart.options.scales && chart.options.scales.x
+        ? chart.options.scales.x.max
+        : 100;
+    var splineSource = photometricResult.chart;
+    var splineRadii = splineSource.radii || [];
+    var splineVels = splineSource.gfd_spline || [];
+    var splineData = [];
+    for (var i = 0; i < splineRadii.length; i++) {
+        if (splineRadii[i] > xMax) break;
+        if (splineVels[i] !== undefined) {
+            splineData.push({ x: splineRadii[i], y: splineVels[i] });
+        }
+    }
+    chart.data.datasets[10].data = splineData;
+    chart.data.datasets[10].hidden = true;  // Never show spline line; GFD (Observed) is dataset 11 only
+
+    var accelVels = splineSource.gfd_accel || [];
+    var accelRadii = splineSource.radii || [];
+    var accelData = [];
+    for (var j = 0; j < accelRadii.length; j++) {
+        if (accelRadii[j] > xMax) break;
+        if (accelVels[j] !== undefined) {
+            accelData.push({ x: accelRadii[j], y: accelVels[j] });
+        }
+    }
+    chart.data.datasets[11].data = accelData;
+    chart.data.datasets[11].hidden = !isAutoFitted;
+
+    chart.update('none');
+}
+
+function renderSandboxCurves() {
+    if (!sandboxResult || !sandboxResult.chart) return;
+
+    var radii = sandboxResult.chart.radii || [];
+    var photoVels = sandboxResult.chart.gfd_photometric || [];
+    var covariantVels = sandboxResult.chart.gfd_covariant || [];
+    var fg = sandboxResult.field_geometry || {};
+
+    // Compute axis limits from sandbox data
+    var derivedRenv = fg.envelope_radius_kpc || 0;
+    var derivedRvis99 = fg.visible_radius_99_kpc || fg.visible_radius_kpc || 0;
+    var obsData = pinnedObservations || [];
+    var maxObsR = obsData.length > 0
+        ? Math.max(...obsData.map(function(o) { return o.r; })) : 0;
+    var sparcRhi = sandboxResult.sparc_r_hi_kpc || 0;
+    var xMax = Math.max(derivedRenv, derivedRvis99, maxObsR, sparcRhi) * 1.10;
+
+    var obsMax = obsData.length > 0
+        ? Math.max(...obsData.map(function(o) { return o.v; })) : 0;
+    var yMax = obsMax > 0 ? Math.ceil(obsMax * 1.2 / 10) * 10 : undefined;
+
+    // Build curve data, filtered to xMax
+    var photoData = [];
+    var sigmaData = [];
+    for (var i = 0; i < radii.length; i++) {
+        if (radii[i] > xMax) break;
+        if (photoVels[i] !== undefined) {
+            photoData.push({ x: radii[i], y: photoVels[i] });
+        }
+        if (covariantVels[i] !== undefined) {
+            sigmaData.push({ x: radii[i], y: covariantVels[i] });
+        }
+    }
+
+    // Spline data uses photometricResult's own radii to avoid index mismatch
+    var splineData = [];
+    var splineSource = (photometricResult && photometricResult.chart) || sandboxResult.chart;
+    var splineRadii = splineSource.radii || [];
+    var splineVels = splineSource.gfd_spline || [];
+    for (var i = 0; i < splineRadii.length; i++) {
+        if (splineRadii[i] > xMax) break;
+        if (splineVels[i] !== undefined) {
+            splineData.push({ x: splineRadii[i], y: splineVels[i] });
+        }
+    }
+
+    // Dataset 1: GFD (Photometric) or GFD (Manual mass params), green dashed
+    var gfdLabel = (sandboxResult.gfd_source === 'manual')
+        ? 'GFD (Manual mass params)'
+        : 'GFD (Photometric)';
+    chart.data.datasets[1].data = photoData;
+    chart.data.datasets[1].label = gfdLabel;
+    var gfdChipLabel = document.getElementById('gfd-chip-label');
+    if (gfdChipLabel) gfdChipLabel.textContent = gfdLabel;
+    chart.data.datasets[1].borderColor = 'rgba(0, 229, 160, 0.7)';
+    chart.data.datasets[1].backgroundColor = 'transparent';
+    chart.data.datasets[1].borderDash = [8, 4];
+    chart.data.datasets[1].borderWidth = 2;
+    chart.data.datasets[1].cubicInterpolationMode = 'monotone';
+    chart.data.datasets[1].tension = 0.4;
+
+    // Dataset 8: old Bayesian GFD Sigma (disabled, kept for legacy)
+    chart.data.datasets[8].data = [];
+    chart.data.datasets[8].hidden = true;
+
+    // Dataset 10: GFD (Observed), magenta solid
+    chart.data.datasets[10].data = splineData;
+    chart.data.datasets[10].label = 'GFD (Observed)';
+    chart.data.datasets[10].borderColor = '#ff44dd';
+    chart.data.datasets[10].backgroundColor = 'transparent';
+    chart.data.datasets[10].borderDash = [];
+    chart.data.datasets[10].borderWidth = 2.5;
+    chart.data.datasets[10].cubicInterpolationMode = 'monotone';
+    chart.data.datasets[10].tension = 0.4;
+    chart.data.datasets[10].hidden = true;  // Spline curve not shown; only GFD (Observed) accel line (dataset 11)
+
+    // Dataset 11: GFD (Observed), purple solid
+    var accelSource = (photometricResult && photometricResult.chart) || sandboxResult.chart;
+    var accelVels = accelSource.gfd_accel || [];
+    var accelRadii = accelSource.radii || [];
+    var accelData = [];
+    for (var i = 0; i < accelRadii.length; i++) {
+        if (accelRadii[i] > xMax) break;
+        if (accelVels[i] !== undefined) {
+            accelData.push({ x: accelRadii[i], y: accelVels[i] });
+        }
+    }
+    chart.data.datasets[11].data = accelData;
+    chart.data.datasets[11].label = 'GFD (Observed)';
+    chart.data.datasets[11].borderColor = '#aa44ff';
+    chart.data.datasets[11].backgroundColor = 'transparent';
+    chart.data.datasets[11].borderDash = [];
+    chart.data.datasets[11].borderWidth = 2.5;
+    chart.data.datasets[11].cubicInterpolationMode = 'monotone';
+    chart.data.datasets[11].tension = 0.4;
+    chart.data.datasets[11].hidden = !isAutoFitted;
+
+    // Clear envelope/band and legacy theory curves; keep Newton/MOND/CDM (0,2,7) for chip toggles
+    chart.data.datasets[4].data = [];   // Envelope upper
+    chart.data.datasets[5].data = [];   // Envelope lower
+    chart.data.datasets[6].data = [];   // Auto fit markers
+    chart.data.datasets[9].data = [];   // GFD Observed
+
+    // Apply axis rules
+    chart.options.scales.x.min = 0;
+    chart.options.scales.x.max = xMax;
+    chart.options.scales.y.min = 0;
+    if (yMax) chart.options.scales.y.max = yMax;
+
+    // Store field geometry for plugins
+    chart.options.plugins.sandboxGeometry = fg;
+
+    chart.update('none');
+
+    if (isAutoFitted) updateVpsChart();
+}
+
+function updatePhotometricPanel() {
+    if (!sandboxResult) return;
+    var pm = sandboxResult.photometric_mass_model;
+    if (!pm) return;
+
+    var gasMass = pm.gas ? pm.gas.M : 0;
+    var gasScale = pm.gas ? pm.gas.Rd : 0;
+    var diskMass = pm.disk ? pm.disk.M : 0;
+    var diskScale = pm.disk ? pm.disk.Rd : 0;
+    var bulgeMass = pm.bulge ? pm.bulge.M : 0;
+    var bulgeScale = pm.bulge ? pm.bulge.a : 0;
+    var totalMass = gasMass + diskMass + bulgeMass;
+
+    // Update display values (Mass Model panel)
+    document.getElementById('gas-mass-value').textContent = gasMass.toExponential(1) + ' M_sun';
+    document.getElementById('gas-scale-value').textContent = gasScale.toFixed(1) + ' kpc';
+    document.getElementById('disk-mass-value').textContent = diskMass.toExponential(1) + ' M_sun';
+    document.getElementById('disk-scale-value').textContent = diskScale.toFixed(1) + ' kpc';
+    document.getElementById('bulge-mass-value').textContent = bulgeMass.toExponential(1) + ' M_sun';
+    document.getElementById('bulge-scale-value').textContent = bulgeScale.toFixed(1) + ' kpc';
+    document.getElementById('mass-model-total-value').textContent = totalMass.toExponential(1) + ' M_sun';
+}
+
+/**
+ * Populate the read-only Observation mode mass panel from photometric_mass_model.
+ * Called when entering Observation mode so the panel shows current photometric values.
+ */
+function populateObservationMassPanel() {
+    var el = function(id) { return document.getElementById(id); };
+    if (!el('obs-gas-mass-value')) return;
+    var pm = sandboxResult && sandboxResult.photometric_mass_model;
+    if (!pm) {
+        el('obs-gas-mass-value').textContent = '--';
+        el('obs-gas-scale-value').textContent = '--';
+        el('obs-disk-mass-value').textContent = '--';
+        el('obs-disk-scale-value').textContent = '--';
+        el('obs-bulge-mass-value').textContent = '--';
+        el('obs-bulge-scale-value').textContent = '--';
+        el('obs-mass-model-total-value').textContent = '--';
+        return;
+    }
+    var gasMass = pm.gas ? pm.gas.M : 0;
+    var gasScale = pm.gas ? pm.gas.Rd : 0;
+    var diskMass = pm.disk ? pm.disk.M : 0;
+    var diskScale = pm.disk ? pm.disk.Rd : 0;
+    var bulgeMass = pm.bulge ? pm.bulge.M : 0;
+    var bulgeScale = pm.bulge ? pm.bulge.a : 0;
+    var totalMass = gasMass + diskMass + bulgeMass;
+    el('obs-gas-mass-value').textContent = gasMass.toExponential(1) + ' M_sun';
+    el('obs-gas-scale-value').textContent = gasScale.toFixed(1) + ' kpc';
+    el('obs-disk-mass-value').textContent = diskMass.toExponential(1) + ' M_sun';
+    el('obs-disk-scale-value').textContent = diskScale.toFixed(1) + ' kpc';
+    el('obs-bulge-mass-value').textContent = bulgeMass.toExponential(1) + ' M_sun';
+    el('obs-bulge-scale-value').textContent = bulgeScale.toFixed(1) + ' kpc';
+    el('obs-mass-model-total-value').textContent = totalMass.toExponential(1) + ' M_sun';
+}
+
+function updateDiagnosticsPanel() {
+    var section = document.getElementById('gfd-diagnostics-section');
+    var body = document.getElementById('gfd-diagnostics-body');
+    if (!section || !body) return;
+    if (!sandboxResult) { section.style.display = 'none'; return; }
+
+    section.style.display = '';
+    var fg = sandboxResult.field_geometry || {};
+    var vs = sandboxResult.vortex_signal || {};
+    var hasBayesian = sandboxResult.rms != null;
+    var rms = sandboxResult.rms || 0;
+    var chi2 = sandboxResult.chi2_dof || 0;
+    var nObs = sandboxResult.n_obs || 0;
+
+    var rvis90 = fg.visible_radius_90_kpc || 0;
+    var rvis99 = fg.visible_radius_99_kpc || 0;
+    var rvisStr = (rvis90 && rvis99)
+        ? rvis90.toFixed(1) + ' to ' + rvis99.toFixed(1) + ' kpc (90% to 99.5%)'
+        : (fg.visible_radius_kpc ? fg.visible_radius_kpc.toFixed(2) + ' kpc' : 'N/A');
+
+    var pendingSpan = '<span style="color:#666;font-style:italic">switch to Observations</span>';
+
+    var html = '';
+    html += '<div style="color:#999;font-weight:600;margin-bottom:4px;">Bayesian Fit</div>';
+    if (hasBayesian) {
+        html += 'RMS: <span style="color:#e0e0e0">' + rms.toFixed(2) + ' km/s</span><br>';
+        html += 'chi2/dof: <span style="color:#e0e0e0">' + chi2.toFixed(4) + '</span><br>';
+        html += 'Observations: <span style="color:#e0e0e0">' + nObs + '</span><br>';
+    } else {
+        html += 'RMS: ' + pendingSpan + '<br>';
+        html += 'chi2/dof: ' + pendingSpan + '<br>';
+        html += 'Observations: <span style="color:#e0e0e0">' + nObs + '</span><br>';
+    }
+
+    html += '<div style="color:#999;font-weight:600;margin-top:8px;margin-bottom:4px;">Vortex Signal (MACD)</div>';
+    if (hasBayesian) {
+        html += 'sigma (net): <span style="color:#e0e0e0">' + (vs.sigma_net || 0).toFixed(4) + '</span><br>';
+        html += 'Boost energy: <span style="color:#4caf50">+' + Math.round(vs.energy_boost || 0).toLocaleString() + ' km2/s2</span><br>';
+        html += 'Suppress energy: <span style="color:#ff6b6b">' + Math.round(vs.energy_suppress || 0).toLocaleString() + ' km2/s2</span><br>';
+        html += 'Boost/Suppress: <span style="color:#e0e0e0">' + (vs.energy_ratio || 0).toFixed(2) + '</span><br>';
+    } else {
+        html += 'sigma (net): ' + pendingSpan + '<br>';
+        html += 'Boost energy: ' + pendingSpan + '<br>';
+        html += 'Suppress energy: ' + pendingSpan + '<br>';
+        html += 'Boost/Suppress: ' + pendingSpan + '<br>';
+    }
+
+    html += '<div style="color:#999;font-weight:600;margin-top:8px;margin-bottom:4px;">Field Geometry</div>';
+    html += 'R_t (throat): <span style="color:#00ff88">' + (fg.throat_radius_kpc ? fg.throat_radius_kpc.toFixed(2) + ' kpc' : 'N/A') + '</span><br>';
+    html += 'R_env (field horizon): <span style="color:#ff6688">' + (fg.envelope_radius_kpc ? fg.envelope_radius_kpc.toFixed(2) + ' kpc' : 'N/A') + '</span><br>';
+    var rHiVal = sandboxResult.sparc_r_hi_kpc;
+    html += 'R_HI (SPARC extent): <span style="color:#ffaa44">' + (rHiVal ? rHiVal.toFixed(1) + ' kpc' : 'N/A') + '</span><br>';
+    html += 'R_vis (baryonic extent): <span style="color:#aa88ff">' + rvisStr + '</span><br>';
+    html += 'R_t / R_env: <span style="color:#e0e0e0">' + (fg.throat_fraction ? fg.throat_fraction.toFixed(4) : 'N/A') + '</span><br>';
+    html += 'Cycle: <span style="color:#e0e0e0">' + (fg.cycle || '?') + '</span>';
+
+    var accelRatio = sandboxResult.accel_ratio_fitted;
+    var accelRms = sandboxResult.accel_rms;
+    if (accelRatio != null) {
+        html += '<div style="color:#999;font-weight:600;margin-top:8px;margin-bottom:4px;">Acceleration Fit</div>';
+        html += 'a0 ratio: <span style="color:#aa44ff">' + accelRatio.toFixed(4) + 'x</span><br>';
+        html += 'RMS: <span style="color:#e0e0e0">' + (accelRms || 0).toFixed(2) + ' km/s</span><br>';
+    }
+
+    body.innerHTML = html;
 }
 
 /**
@@ -1074,7 +2054,7 @@ async function runMultiPointInference(accelRatio, massModel) {
     var multiBody = document.getElementById('multi-inference-body');
     if (!multiDiv || !multiBody) return;
 
-    if (currentMode !== 'inference') {
+    if (currentMode !== 'inference' && !isAutoFitted) {
         multiDiv.style.display = 'none';
         clearInferenceChart();
         return;
@@ -1170,8 +2150,8 @@ function getBandHalfWidth(method) {
  */
 function getBandMethodInfo(method) {
     var labels = {
-        'weighted_rms':     {label: 'Weighted RMS',  desc: 'Spread of per-point inferences vs GFD prediction, weighted by enclosed fraction'},
-        'weighted_scatter': {label: '1-sigma Scatter', desc: 'Weighted std dev of per-point inferences around their mean'},
+        'weighted_rms':     {label: 'Weighted RMS',  desc: 'Spread of per-point mass estimates vs GFD model, weighted by enclosed fraction'},
+        'weighted_scatter': {label: '1-sigma Scatter', desc: 'Weighted std dev of per-point mass estimates around their mean'},
         'obs_error':        {label: 'Obs. Error',   desc: 'Propagated velocity measurement uncertainties through the field equation'},
         'min_max':          {label: 'Min-Max',       desc: 'Full range of per-point inferred masses (most conservative)'},
         'iqr':              {label: 'IQR (Robust)',  desc: 'Interquartile range, resistant to outlier inner points'}
@@ -1182,46 +2162,35 @@ function getBandMethodInfo(method) {
 /**
  * Recompute and render the confidence band.
  *
- * In inference mode the band is the envelope between the GFD (dataset 1)
- * and GFD+ (dataset 8) curves already on the chart.  This gives a clean
- * "theory range" without extra API calls or mass scaling.
- *
- * In prediction mode the band is still available via the legacy
- * mass-scaling approach (unused for now, kept as fallback).
+ * In Auto Fit mode the band is the (4/pi)^(1/4) geometric band
+ * around the GFD base curve, derived from the k=4 coupling topology.
+ * This gives a +/- 6.2% physics-derived uncertainty envelope.
  */
 async function updateBand() {
-    if (!lastMultiResult || !lastMassModel || lastModelTotal <= 0) {
+    // After auto-map, wrap the band around GFD (Observed) (dataset 9)
+    // since that is the primary answer curve. Otherwise use GFD base (dataset 1).
+    var gfdData = isAutoFitted
+        ? chart.data.datasets[9].data
+        : chart.data.datasets[1].data;
+    if (!gfdData || gfdData.length === 0) {
         chart.data.datasets[4].data = [];
         chart.data.datasets[5].data = [];
         chart.update('none');
         return;
     }
 
-    // --- Inference mode: envelope between GFD and GFD-sigma ---
-    var gfdData = chart.data.datasets[1].data;       // GFD
-    var gfdSigmaData = chart.data.datasets[9].data;  // GFD-sigma
-
-    if (gfdData.length > 0 && gfdSigmaData.length > 0) {
-        // Both curves exist: band = max / min at each point
-        var upperData = [], lowerData = [];
-        var len = Math.min(gfdData.length, gfdSigmaData.length);
-        for (var i = 0; i < len; i++) {
-            var yGfd = gfdData[i].y;
-            var ySigma = gfdSigmaData[i].y;
-            var x = gfdData[i].x;
-            upperData.push({x: x, y: Math.max(yGfd, ySigma)});
-            lowerData.push({x: x, y: Math.min(yGfd, ySigma)});
-        }
-        chart.data.datasets[4].data = upperData;
-        chart.data.datasets[5].data = lowerData;
-    } else {
-        chart.data.datasets[4].data = [];
-        chart.data.datasets[5].data = [];
+    var pct = parseFloat(lensSlider.value) / 100.0;
+    var upperData = [], lowerData = [];
+    for (var i = 0; i < gfdData.length; i++) {
+        var v = gfdData[i].y;
+        var x = gfdData[i].x;
+        upperData.push({x: x, y: v * (1 + pct)});
+        lowerData.push({x: x, y: v * (1 - pct)});
     }
+    chart.data.datasets[4].data = upperData;
+    chart.data.datasets[5].data = lowerData;
 
     chart.update('none');
-
-    // Update the band label in the sidebar
     updateBandLabel();
 }
 
@@ -1230,11 +2199,43 @@ async function updateBand() {
  */
 function updateBandLabel() {
     var el = document.getElementById('band-width-display');
-    if (!el || lastModelTotal <= 0) return;
-    el.innerHTML = '<strong style="color:#e0e0e0;">Band:</strong> '
-        + '<span style="color:#00E5FF;">GFD / GFD\u03C3 envelope</span>'
-        + '<div style="font-size:0.8em; color:#606060; margin-top:2px;">'
-        + 'Shaded region between base GFD and GFD\u03C6 (structural) predictions</div>';
+    if (!el) return;
+    if (isAutoFitted) {
+        el.innerHTML = '<strong style="color:#e0e0e0;">Band:</strong> '
+            + '<span style="color:#76FF03;">(4/\u03C0)<sup>1/4</sup> = \u00B16.2%</span>'
+            + '<div style="font-size:0.8em; color:#606060; margin-top:2px;">'
+            + 'Geometric envelope from k=4 coupling topology</div>';
+    } else {
+        el.innerHTML = '';
+    }
+}
+
+/**
+ * Render the lens throughput band from the slider value around the GFD curve.
+ * Called when the lens slider changes or after chart data updates.
+ */
+function updateLensBand() {
+    // After auto-map, wrap the band around GFD (Observed) (dataset 9)
+    var gfdData = isAutoFitted
+        ? chart.data.datasets[9].data
+        : chart.data.datasets[1].data;
+    if (!gfdData || gfdData.length === 0) {
+        chart.data.datasets[4].data = [];
+        chart.data.datasets[5].data = [];
+        chart.update('none');
+        return;
+    }
+    var pct = parseFloat(lensSlider.value) / 100.0;
+    var upperData = [], lowerData = [];
+    for (var i = 0; i < gfdData.length; i++) {
+        var v = gfdData[i].y;
+        var x = gfdData[i].x;
+        upperData.push({x: x, y: v * (1 + pct)});
+        lowerData.push({x: x, y: v * (1 - pct)});
+    }
+    chart.data.datasets[4].data = upperData;
+    chart.data.datasets[5].data = lowerData;
+    chart.update('none');
 }
 
 /**
@@ -1263,7 +2264,7 @@ function renderMultiPointSidebar(result, modelTotal) {
     html += '</div>';
 
     html += '<div style="margin-bottom: 6px;">';
-    html += '<strong style="color:#e0e0e0;">GFD Prediction:</strong> ';
+    html += '<strong style="color:#e0e0e0;">GFD Model:</strong> ';
     html += '<span style="color:#4da6ff;">' + anchorCoeff.toFixed(2);
     html += ' \u00D7 10' + superscript(anchorExp) + ' M\u2609</span>';
     html += '</div>';
@@ -1283,7 +2284,7 @@ function renderMultiPointSidebar(result, modelTotal) {
     html += '<div style="margin-bottom: 10px;">';
     html += '<strong style="color:#e0e0e0;">Mass Offset:</strong> ';
     html += '<span style="color:' + agColor + ';">' + agSign + agreementPct.toFixed(1) + '%</span>';
-    html += ' <span style="color:#606060; font-size:0.85em;">(obs. mean vs GFD prediction)</span>';
+    html += ' <span style="color:#606060; font-size:0.85em;">(obs. mean vs GFD model)</span>';
     html += '</div>';
 
     // Per-point table
@@ -1292,7 +2293,7 @@ function renderMultiPointSidebar(result, modelTotal) {
     html += '<th style="text-align:left; padding:4px 6px;">r (kpc)</th>';
     html += '<th style="text-align:left; padding:4px 6px;">v (km/s)</th>';
     html += '<th style="text-align:right; padding:4px 6px;">M enc.</th>';
-    html += '<th style="text-align:right; padding:4px 6px;" title="Velocity residual: observed minus GFD prediction">\u0394v</th>';
+    html += '<th style="text-align:right; padding:4px 6px;" title="Velocity residual: observed minus GFD model">\u0394v</th>';
     html += '<th style="text-align:right; padding:4px 6px;" title="Sigma deviation: |v_obs - v_GFD| / error">\u03C3</th>';
     html += '</tr>';
 
@@ -1477,10 +2478,6 @@ function renderMultiPointSidebar(result, modelTotal) {
  * Clear inference-specific chart elements (band + markers).
  */
 function clearInferenceChart() {
-    if (chart.data.datasets.length > 4) {
-        chart.data.datasets[4].data = [];
-        chart.data.datasets[5].data = [];
-    }
     if (chart.data.datasets.length > 6) {
         chart.data.datasets[6].data = [];
     }
@@ -1501,79 +2498,54 @@ function debouncedUpdateChart() {
 async function updateChart() {
     const maxRadius = parseFloat(distanceSlider.value);
     const accelRatio = parseFloat(accelSlider.value);
+    var lastApiData = null; // local ref, also stored as lastApiResponse
 
     if (currentMode === 'inference') {
-        // Inference mode: use mass distribution shape from sliders,
-        // auto-scale component masses to match observation via DTG
-        const r_obs = parseFloat(anchorRadiusInput.value);
-        const v_obs = parseFloat(velocitySlider.value);
-        const shapeModel = getMassModelFromSliders();
-
-        // Update anchor display
-        var anchorDisplay = document.getElementById('anchor-display');
-        if (anchorDisplay) {
-            anchorDisplay.textContent = v_obs + ' km/s at ' + r_obs + ' kpc';
-        }
+        const massModel = getMassModelFromSliders();
 
         try {
-            // Call the distributed inference endpoint
-            const inferResult = await fetchInferredMassModel(r_obs, v_obs, accelRatio, shapeModel);
-
-            // Update inferred mass display
-            const totalMass = inferResult.inferred_total;
-            const massExp = Math.floor(Math.log10(totalMass));
-            const massCoeff = totalMass / Math.pow(10, massExp);
-            inferredMassValue.textContent = massCoeff.toFixed(2) + '\u00D7' + '10' + superscript(massExp) + ' M\u2609';
-
-            // Update BTFR display
-            const btfrEl = document.getElementById('btfr-mass-value');
-            if (btfrEl) {
-                const btfr = inferResult.btfr_mass;
-                const btfrExp = Math.floor(Math.log10(btfr));
-                const btfrCoeff = btfr / Math.pow(10, btfrExp);
-                btfrEl.textContent = btfrCoeff.toFixed(2) + '\u00D7' + '10' + superscript(btfrExp) + ' M\u2609';
-            }
-
-            // Update mass sliders to show the inferred (scaled) values
-            // but only update masses, not scale lengths (user controls the shape)
-            const scaledModel = inferResult.inferred_mass_model;
-            if (scaledModel) {
-                // Silently update mass slider positions without triggering events
-                if (scaledModel.bulge && scaledModel.bulge.M > 0)
-                    bulgeMassSlider.value = Math.log10(Math.max(scaledModel.bulge.M, 1e7));
-                if (scaledModel.disk && scaledModel.disk.M > 0)
-                    diskMassSlider.value = Math.log10(Math.max(scaledModel.disk.M, 1e7));
-                if (scaledModel.gas && scaledModel.gas.M > 0)
-                    gasMassSlider.value = Math.log10(Math.max(scaledModel.gas.M, 1e7));
-                // Update display labels (but don't retrigger updateChart)
-                updateMassModelDisplaysOnly();
-            }
-
-            // Compute full rotation curve with the inferred distributed model
-            const curveModel = scaledModel || shapeModel;
-
-            // Extend chart range to cover all observed data if available (use pinned if tweaking)
             var chartMaxR = maxRadius;
             var predObs = pinnedObservations || (currentExample ? getPredictionObservations(currentExample) : null);
             if (predObs && predObs.length > 0) {
                 var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
                 chartMaxR = Math.max(chartMaxR, maxObsR * 1.15);
             }
-
-            const data = await fetchRotationCurve(chartMaxR, accelRatio, curveModel, predObs, getGalacticRadius());
-            renderCurves(data);
-
-            // Sync auto Origin Throughput from API
-            if (data.auto_origin_throughput !== undefined) {
-                autoVortexStrength = data.auto_origin_throughput;
-                if (isAutoThroughput) {
-                    vortexStrengthSlider.value = autoVortexStrength;
-                    vortexStrengthValue.textContent = autoVortexStrength.toFixed(2);
-                }
+            // In observation mode, extend chart to show the field horizon.
+            // Use derived R_env if available, otherwise the slider value.
+            var horizonR = (inferredFieldGeometry && inferredFieldGeometry.envelope_radius_kpc)
+                ? inferredFieldGeometry.envelope_radius_kpc
+                : getGalacticRadius();
+            if (horizonR) {
+                chartMaxR = Math.max(chartMaxR, horizonR * 1.15);
             }
 
-            // Show observation points -- use pinned observations if user is fine-tuning,
-            // but respect the user's toggle chip state
+            // Run inference only when entering Observation mode.
+            // After that, use prediction endpoint so the optimizer
+            // doesn't overwrite user slider adjustments.
+            // In observation mode, use the derived R_env (from
+            // solve_field_geometry) so the prediction endpoint's sigma
+            // stage stays consistent with the inference result.
+            var effectiveGR = (isAutoFitted
+                && inferredFieldGeometry
+                && inferredFieldGeometry.envelope_radius_kpc)
+                ? inferredFieldGeometry.envelope_radius_kpc
+                : getGalacticRadius();
+            var data;
+            if (inferenceNeeded) {
+                inferenceNeeded = false;
+                data = await fetchInferRotationCurve(chartMaxR, accelRatio, massModel, predObs, effectiveGR);
+            } else {
+                data = await fetchRotationCurve(chartMaxR, accelRatio, massModel, predObs, effectiveGR);
+            }
+            lastApiData = data;
+            lastApiResponse = data;
+            if (data.field_geometry) {
+                inferredFieldGeometry = data.field_geometry;
+            }
+            renderCurves(data);
+            syncThroughputFromResponse(data);
+
+            // Show observation points
             var obsEnabled = isChipEnabled('observed');
             var visibleObs = predObs;
             if (visibleObs && visibleObs.length > 0) {
@@ -1592,39 +2564,31 @@ async function updateChart() {
                 observedLegend.style.display = 'none';
             }
 
-            // Multi-point consistency analysis (fire-and-forget, updates chart independently)
-            runMultiPointInference(accelRatio, curveModel);
+            // Multi-point consistency analysis (fire-and-forget)
+            runMultiPointInference(accelRatio, massModel);
 
         } catch (err) {
-            console.error('Inference API error:', err);
+            console.error('Auto Fit API error:', err);
         }
     } else {
-        // Prediction mode: use distributed mass model from sliders
+        // Explore mode: use distributed mass model from sliders
         const massModel = getMassModelFromSliders();
 
         try {
-            // Pass observations for CDM halo fitting when available (use pinned if tweaking)
+            // Pass observations for CDM halo fitting when available
             var predObs = pinnedObservations || (currentExample ? currentExample.observations : null);
-            // Extend chart range to cover all observed data
             var predMaxR = maxRadius;
             if (predObs && predObs.length > 0) {
                 var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
                 predMaxR = Math.max(predMaxR, maxObsR * 1.15);
             }
             const data = await fetchRotationCurve(predMaxR, accelRatio, massModel, predObs, getGalacticRadius());
+            lastApiData = data;
+            lastApiResponse = data;
             renderCurves(data);
+            syncThroughputFromResponse(data);
 
-            // Sync auto Origin Throughput from API
-            if (data.auto_origin_throughput !== undefined) {
-                autoVortexStrength = data.auto_origin_throughput;
-                if (isAutoThroughput) {
-                    vortexStrengthSlider.value = autoVortexStrength;
-                    vortexStrengthValue.textContent = autoVortexStrength.toFixed(2);
-                }
-            }
-
-            // Handle observed data -- show pinned observations even when sliders are adjusted,
-            // but respect the user's toggle chip state
+            // Handle observed data
             var visibleObs = pinnedObservations || (currentExample ? currentExample.observations : null);
             var obsEnabled = isChipEnabled('observed');
             if (visibleObs && visibleObs.length > 0) {
@@ -1644,6 +2608,7 @@ async function updateChart() {
     }
 
     chart.update('none');
+    updateRightPanel(lastApiData);
 }
 
 function renderCurves(data) {
@@ -1653,9 +2618,6 @@ function renderCurves(data) {
     const cdmData = [];
     const gfdSymmetricData = [];
 
-    // Clip GFD-sigma at the field horizon (R_env)
-    var rEnv = getGalacticRadius();
-
     for (let i = 0; i < data.radii.length; i++) {
         newtonianData.push({x: data.radii[i], y: data.newtonian[i]});
         dtgData.push({x: data.radii[i], y: data.dtg[i]});
@@ -1663,22 +2625,57 @@ function renderCurves(data) {
         if (data.cdm) {
             cdmData.push({x: data.radii[i], y: data.cdm[i]});
         }
-        if (data.gfd_symmetric && (!rEnv || data.radii[i] <= rEnv + 0.5)) {
+        if (data.gfd_symmetric) {
             gfdSymmetricData.push({x: data.radii[i], y: data.gfd_symmetric[i]});
         }
     }
 
     chart.data.labels = [];
-    chart.data.datasets[0].data = newtonianData;
-    chart.data.datasets[1].data = dtgData;
-    chart.data.datasets[2].data = mondData;
-    chart.data.datasets[7].data = cdmData;
-    chart.data.datasets[8].data = [];
-    chart.data.datasets[9].data = gfdSymmetricData;
+
+    // When sandbox data is loaded, it owns datasets 1 and 8; still fill
+    // Newton/MOND/CDM from API so researchers can toggle them on.
+    if (sandboxResult) {
+        chart.data.datasets[0].data = newtonianData;
+        chart.data.datasets[2].data = mondData;
+        chart.data.datasets[7].data = cdmData;
+        chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
+        chart.data.datasets[2].hidden = !isChipEnabled('mond');
+        chart.data.datasets[7].hidden = !isChipEnabled('cdm');
+        chart.data.datasets[4].data = [];
+        chart.data.datasets[5].data = [];
+        chart.data.datasets[9].data = [];
+    } else {
+        chart.data.datasets[0].data = newtonianData;
+        chart.data.datasets[1].data = dtgData;
+        chart.data.datasets[2].data = mondData;
+        chart.data.datasets[7].data = cdmData;
+        chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
+        chart.data.datasets[2].hidden = !isChipEnabled('mond');
+        chart.data.datasets[7].hidden = !isChipEnabled('cdm');
+        chart.data.datasets[8].data = [];
+        chart.data.datasets[9].data = gfdSymmetricData;
+
+        if (dtgData.length > 0) {
+            var pct = parseFloat(lensSlider.value) / 100.0;
+            var bandUpper = [];
+            var bandLower = [];
+            for (var i = 0; i < dtgData.length; i++) {
+                var v = dtgData[i].y;
+                var r = dtgData[i].x;
+                bandUpper.push({x: r, y: v * (1 + pct)});
+                bandLower.push({x: r, y: v * (1 - pct)});
+            }
+            chart.data.datasets[4].data = bandUpper;
+            chart.data.datasets[5].data = bandLower;
+        }
+    }
 
     // Store CDM halo info for display
     lastCdmHalo = data.cdm_halo || null;
     updateCdmHaloPanel();
+
+    // Update right metrics panel with live data
+    updateMetricsPanel(data);
 }
 
 function updateCdmHaloPanel() {
@@ -1718,6 +2715,228 @@ function updateCdmHaloPanel() {
 }
 
 // =====================================================================
+// RIGHT METRICS PANEL
+// =====================================================================
+
+/**
+ * Linearly interpolate the GFD curve value at a given radius.
+ * gfdData is an array of {x, y} sorted by x.
+ */
+function interpolateGfdAt(r, gfdData) {
+    if (!gfdData || gfdData.length === 0) return null;
+    if (r <= gfdData[0].x) return gfdData[0].y;
+    if (r >= gfdData[gfdData.length - 1].x) return gfdData[gfdData.length - 1].y;
+    for (var i = 1; i < gfdData.length; i++) {
+        if (gfdData[i].x >= r) {
+            var x0 = gfdData[i - 1].x, y0 = gfdData[i - 1].y;
+            var x1 = gfdData[i].x,     y1 = gfdData[i].y;
+            var t = (r - x0) / (x1 - x0);
+            return y0 + t * (y1 - y0);
+        }
+    }
+    return null;
+}
+
+/**
+ * Compute fit quality metrics from observations vs GFD curve.
+ * Returns {rms, chi2r, within1s, within2s, nObs, residuals[]}.
+ */
+function computeFitMetrics(observations, gfdData) {
+    if (!observations || observations.length === 0 || !gfdData || gfdData.length === 0) {
+        return null;
+    }
+
+    var sumSq = 0;
+    var chi2 = 0;
+    var n = 0;
+    var w1 = 0, w2 = 0;
+    var residuals = [];
+
+    for (var i = 0; i < observations.length; i++) {
+        var obs = observations[i];
+        var vGfd = interpolateGfdAt(obs.r, gfdData);
+        if (vGfd === null) continue;
+
+        var dv = obs.v - vGfd;
+        var err = obs.err || 0;
+        var sigDev = (err > 0) ? Math.abs(dv) / err : null;
+
+        sumSq += dv * dv;
+        if (err > 0) {
+            chi2 += (dv * dv) / (err * err);
+        }
+        n++;
+
+        if (sigDev !== null) {
+            if (sigDev <= 1) w1++;
+            if (sigDev <= 2) w2++;
+        }
+
+        residuals.push({
+            r: obs.r,
+            vObs: obs.v,
+            vGfd: vGfd,
+            dv: dv,
+            sigma: sigDev
+        });
+    }
+
+    if (n === 0) return null;
+
+    var dof = Math.max(n - 1, 1);
+    return {
+        rms: Math.sqrt(sumSq / n),
+        chi2r: chi2 / dof,
+        within1s: w1,
+        within2s: w2,
+        nObs: n,
+        residuals: residuals
+    };
+}
+
+/**
+ * Format a number in scientific notation like "1.23e10".
+ */
+function fmtSci(val) {
+    if (!val || val === 0) return '--';
+    var exp = Math.floor(Math.log10(Math.abs(val)));
+    var coeff = val / Math.pow(10, exp);
+    return coeff.toFixed(2) + 'e' + exp;
+}
+
+/**
+ * Toggle a metrics section open/closed.
+ */
+function toggleMetricsSection(headerEl) {
+    var section = headerEl.parentElement;
+    var body = headerEl.nextElementSibling;
+    var chevron = headerEl.querySelector('.metrics-chevron');
+    if (!body) return;
+
+    if (body.style.display === 'none') {
+        body.style.display = '';
+        section.classList.remove('collapsed');
+        if (chevron) chevron.innerHTML = '&#9660;';
+    } else {
+        body.style.display = 'none';
+        section.classList.add('collapsed');
+        if (chevron) chevron.innerHTML = '&#9654;';
+    }
+}
+
+/**
+ * Update the right metrics panel with live data.
+ * Called after every renderCurves() and chart update.
+ */
+function updateMetricsPanel(apiData) {
+    var gfdData = chart.data.datasets[1].data;
+    var obs = pinnedObservations || (currentExample ? currentExample.observations : null);
+
+    // --- Fit Quality ---
+    var rmsEl = document.getElementById('metric-rms');
+    var chi2El = document.getElementById('metric-chi2');
+    var hits1El = document.getElementById('metric-hits-1s');
+    var hits2El = document.getElementById('metric-hits-2s');
+
+    var metrics = computeFitMetrics(obs, gfdData);
+    if (metrics) {
+        rmsEl.textContent = metrics.rms.toFixed(1) + ' km/s';
+        rmsEl.className = 'metrics-value' + (metrics.rms < 10 ? ' good' : metrics.rms < 25 ? ' warn' : ' bad');
+
+        chi2El.textContent = metrics.chi2r.toFixed(2);
+        chi2El.className = 'metrics-value' + (metrics.chi2r < 1.5 ? ' good' : metrics.chi2r < 3 ? ' warn' : ' bad');
+
+        hits1El.textContent = metrics.within1s + '/' + metrics.nObs;
+        hits1El.className = 'metrics-value' + (metrics.within1s / metrics.nObs >= 0.68 ? ' good' : ' warn');
+
+        hits2El.textContent = metrics.within2s + '/' + metrics.nObs;
+        hits2El.className = 'metrics-value' + (metrics.within2s / metrics.nObs >= 0.95 ? ' good' : ' warn');
+    } else {
+        rmsEl.textContent = '--';  rmsEl.className = 'metrics-value';
+        chi2El.textContent = '--'; chi2El.className = 'metrics-value';
+        hits1El.textContent = '--'; hits1El.className = 'metrics-value';
+        hits2El.textContent = '--'; hits2El.className = 'metrics-value';
+    }
+
+    // --- Observation Summary ---
+    var npEl = document.getElementById('metric-npoints');
+    var rangeEl = document.getElementById('metric-radial-range');
+    var errEl = document.getElementById('metric-mean-err');
+
+    if (obs && obs.length > 0) {
+        npEl.textContent = obs.length;
+        var radii = obs.map(function(o) { return o.r; });
+        rangeEl.textContent = Math.min.apply(null, radii).toFixed(1) + ' - ' + Math.max.apply(null, radii).toFixed(1) + ' kpc';
+        var meanErr = obs.reduce(function(s, o) { return s + (o.err || 0); }, 0) / obs.length;
+        errEl.textContent = '+/- ' + meanErr.toFixed(1) + ' km/s';
+    } else {
+        npEl.textContent = '--';
+        rangeEl.textContent = '--';
+        errEl.textContent = '--';
+    }
+
+    // --- Mass Model ---
+    var mm = getMassModelFromSliders();
+    var totalM = mm.bulge.M + mm.disk.M + mm.gas.M;
+    var gasFrac = totalM > 0 ? (mm.gas.M / totalM * 100) : 0;
+
+    document.getElementById('metric-total-mass').textContent = fmtSci(totalM) + ' M_sun';
+    document.getElementById('metric-gas-frac').textContent = gasFrac.toFixed(1) + '%';
+    // NOTE: metric-field-origin and metric-field-horizon are written by
+    // updateRightPanel() which runs after this function and correctly
+    // uses inferredFieldGeometry when in observation mode.
+
+    // --- CDM Comparison ---
+    var m200El = document.getElementById('metric-cdm-m200');
+    var cEl = document.getElementById('metric-cdm-c');
+    var r200El = document.getElementById('metric-cdm-r200');
+    var methodEl = document.getElementById('metric-cdm-method');
+    var paramsEl = document.getElementById('metric-cdm-params');
+
+    if (lastCdmHalo) {
+        m200El.textContent = fmtSci(lastCdmHalo.m200) + ' M_sun';
+        cEl.textContent = lastCdmHalo.c;
+        r200El.textContent = lastCdmHalo.r200_kpc ? (lastCdmHalo.r200_kpc + ' kpc') : '--';
+        var shortMethod = lastCdmHalo.method || '';
+        if (shortMethod.indexOf('abundance') >= 0) shortMethod = 'Abundance matching';
+        else if (shortMethod.indexOf('chi') >= 0) shortMethod = 'Chi-sq fit';
+        methodEl.textContent = shortMethod;
+        paramsEl.textContent = lastCdmHalo.n_params_total || 2;
+    } else {
+        m200El.textContent = '--';
+        cEl.textContent = '--';
+        r200El.textContent = '--';
+        methodEl.textContent = '--';
+        paramsEl.textContent = '--';
+    }
+
+    // --- Residuals Table ---
+    var tbody = document.getElementById('metrics-residuals-tbody');
+    if (tbody && metrics && metrics.residuals.length > 0) {
+        var html = '';
+        for (var i = 0; i < metrics.residuals.length; i++) {
+            var res = metrics.residuals[i];
+            var rowClass = '';
+            if (res.sigma !== null) {
+                if (res.sigma <= 1) rowClass = 'sigma-good';
+                else if (res.sigma <= 2) rowClass = 'sigma-warn';
+                else rowClass = 'sigma-bad';
+            }
+            html += '<tr class="' + rowClass + '">';
+            html += '<td>' + res.r.toFixed(1) + '</td>';
+            html += '<td>' + res.vObs.toFixed(0) + '</td>';
+            html += '<td>' + res.vGfd.toFixed(0) + '</td>';
+            html += '<td>' + (res.dv >= 0 ? '+' : '') + res.dv.toFixed(1) + '</td>';
+            html += '<td>' + (res.sigma !== null ? res.sigma.toFixed(1) : '--') + '</td>';
+            html += '</tr>';
+        }
+        tbody.innerHTML = html;
+    } else if (tbody) {
+        tbody.innerHTML = '';
+    }
+}
+
+// =====================================================================
 // DISPLAY UPDATES
 // =====================================================================
 
@@ -1749,11 +2968,11 @@ function updateExamplesDropdown() {
     // Add placeholder
     const placeholder = document.createElement('option');
     placeholder.value = '0';
-    placeholder.textContent = 'Select an example...';
+    placeholder.textContent = 'Select a galaxy...';
     dropdown.appendChild(placeholder);
 
-    // Add galaxies for current mode
-    const galaxies = galaxyCatalog[currentMode] || [];
+    // Always use prediction galaxies (unified observation flow)
+    const galaxies = galaxyCatalog.prediction || [];
     galaxies.forEach((galaxy, index) => {
         const option = document.createElement('option');
         option.value = String(index + 1);
@@ -1773,24 +2992,41 @@ function loadExample() {
         pinnedObservations = null;
         pinnedGalaxyLabel = null;
         pinnedGalaxyExample = null;
+        sandboxResult = null;
+        hideObsTabs();
         chart.options.plugins.title.text = 'Rotation Curve: Gravitational Theory Comparison';
         chart.options.plugins.zoom.limits.x.min = 0;
         chart.options.plugins.zoom.limits.x.max = 100;
         chart.resetZoom();
-        updateDataCardButton();
         updateChart();
         return;
     }
 
     isLoadingExample = true;
 
-    const galaxies = galaxyCatalog[currentMode] || [];
+    // Always use prediction galaxies (unified observation flow)
+    const galaxies = galaxyCatalog.prediction || [];
     const example = galaxies[selectedIndex - 1];
     if (!example) { isLoadingExample = false; return; }
 
+    // Reset to Mass Model mode when changing galaxy
+    isAutoFitted = false;
+    inferredFieldGeometry = null;
+    currentMode = 'prediction';
+    document.querySelector('.mass-model-header-text').textContent = 'Mass Distribution';
+    hideAutoMapDiagnostics();
+    // Reset inference-mode UI
+    velocityControl.style.display = 'none';
+    inferenceResult.classList.remove('visible');
+    var multiDiv = document.getElementById('multi-inference-result');
+    if (multiDiv) multiDiv.style.display = 'none';
+    setMassSliderEditable(true);
+    unlockAllChips();
+    updateBandLabel();
+
     // Extract galaxy display name (strip mass info in parentheses)
     const galaxyLabel = example.name.replace(/\s*\(.*\)/, '');
-    chart.options.plugins.title.text = galaxyLabel + ' \u2014 Rotation Curve';
+    chart.options.plugins.title.text = galaxyLabel + ': GFD Velocity Curves';
 
     chart.data.datasets[3].data = [];
     chart.data.datasets[3].hidden = true;
@@ -1800,52 +3036,27 @@ function loadExample() {
 
     // Pin observations so they survive slider adjustments
     var pinObs = example.observations;
-    if (!pinObs && currentMode === 'inference') {
-        pinObs = getPredictionObservations(example);
-    }
     pinnedObservations = pinObs || null;
     pinnedGalaxyLabel = galaxyLabel;
     pinnedGalaxyExample = example;
 
     accelSlider.value = example.accel;
+    distanceSlider.value = example.distance;
+    anchorRadiusInput.value = example.distance;
+    massSlider.value = example.mass || 11;
 
-    if (currentMode === 'prediction') {
-        distanceSlider.value = example.distance;
-        anchorRadiusInput.value = example.distance;
-        massSlider.value = example.mass || 11;
-    } else {
-        // In inference mode: anchor radius = the observation point,
-        // distance slider = chart range (match prediction counterpart)
-        anchorRadiusInput.value = example.distance;
-        velocitySlider.value = example.velocity || 200;
-
-        // Find the prediction counterpart's distance for the chart range
-        var predDistance = example.distance;
-        var baseId = example.id.replace(/_inference$/, '');
-        if (baseId === 'mw') baseId = 'milky_way';
-        var predictions = galaxyCatalog.prediction || [];
-        for (var i = 0; i < predictions.length; i++) {
-            if (predictions[i].id === baseId) {
-                predDistance = predictions[i].distance;
-                break;
-            }
-        }
-        // Use the larger of: prediction distance, or max obs radius + padding
-        var chartDist = predDistance;
-        var obsForRange = getPredictionObservations(example);
-        if (obsForRange && obsForRange.length > 0) {
-            var maxObsR = Math.max.apply(null, obsForRange.map(function(o) { return o.r; }));
-            chartDist = Math.max(chartDist, maxObsR * 1.15);
-        }
-        distanceSlider.value = chartDist;
+    // Show/hide view-mode toggle based on whether galaxy has observations
+    var viewToggle = document.getElementById('view-mode-toggle');
+    if (viewToggle) {
+        viewToggle.style.display = (example.observations && example.observations.length > 0)
+            ? '' : 'none';
     }
+
+    // Switch to Mass Model view (hide VPS histogram panel, show mass panel)
+    enterMassModelMode();
 
     // Set zoom limits based on observational data or distance
-    // For inference mode, use prediction counterpart's observations if available
     var obsData = example.observations;
-    if (!obsData && currentMode === 'inference') {
-        obsData = getPredictionObservations(example);
-    }
     if (obsData && obsData.length > 0) {
         const obsRadii = obsData.map(obs => obs.r);
         const minR = Math.min(...obsRadii);
@@ -1875,94 +3086,858 @@ function loadExample() {
     // gas leverage. No jumping since the first (and only) render uses
     // the auto value. The slider syncs from the API response.
     isAutoThroughput = true;
+    inferenceNeeded = false;
     vortexAutoBtn.classList.add('active');
     vortexStrengthValue.textContent = 'auto';
 
+    massModelManuallyModified = false;
+    updateResetToPhotometricButton();
     updateDisplays();
-    updateChart().then(() => {
+
+    // Render observations directly onto the chart
+    var obsEnabled = isChipEnabled('observed');
+    if (pinnedObservations && pinnedObservations.length > 0) {
+        chart.data.datasets[3].data = pinnedObservations.map(function(obs) {
+            return { x: obs.r, y: obs.v, err: obs.err || 0 };
+        });
+        chart.data.datasets[3].hidden = !obsEnabled;
+        chart.data.datasets[3].errorBars = pinnedObservations.map(function(obs) {
+            return obs.err || 0;
+        });
+    }
+
+    // Phase 1: fast photometric (mass model only, instant)
+    // Phase 2: observation fits (GFD Sigma + Accel, ~2-3s, background)
+    // Also fetch rotation curve for Newton/MOND/CDM so researchers can toggle them on.
+    if (example.id) {
+        var massModel = getMassModelFromSliders();
+        var predObs = example.observations || [];
+        var predMaxR = parseFloat(distanceSlider.value);
+        if (predObs.length > 0) {
+            var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
+            predMaxR = Math.max(predMaxR, maxObsR * 1.15);
+        }
+        var gr = example.galactic_radius ? parseFloat(example.galactic_radius) : parseFloat(distanceSlider.value);
+        fetchPhotometricData(example.id).then(function() {
+            hideResetButton();
+            isLoadingExample = false;
+            massModelManuallyModified = false;
+            updateResetToPhotometricButton();
+            if (pinnedObservations && pinnedObservations.length > 0) showObsTabs(); else hideObsTabs();
+            fetchObservationData(example.id);
+            fetchRotationCurve(predMaxR, parseFloat(accelSlider.value), massModel, predObs, gr).then(function(data) {
+                var i;
+                var newtonianData = [];
+                var mondData = [];
+                var cdmData = [];
+                for (i = 0; i < (data.radii || []).length; i++) {
+                    newtonianData.push({ x: data.radii[i], y: data.newtonian[i] });
+                    mondData.push({ x: data.radii[i], y: data.mond[i] });
+                    if (data.cdm) cdmData.push({ x: data.radii[i], y: data.cdm[i] });
+                }
+                chart.data.datasets[0].data = newtonianData;
+                chart.data.datasets[2].data = mondData;
+                chart.data.datasets[7].data = cdmData;
+                chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
+                chart.data.datasets[2].hidden = !isChipEnabled('mond');
+                chart.data.datasets[7].hidden = !isChipEnabled('cdm');
+                if (data.cdm_halo) lastCdmHalo = data.cdm_halo;
+                chart.update('none');
+            }).catch(function() {});
+        });
+    } else {
+        chart.update('none');
         chart.resetZoom();
         hideResetButton();
-        updateDataCardButton();
         isLoadingExample = false;
-    });
+    }
 }
 
 // =====================================================================
-// MODE SWITCHING
+// VIEW MODE TOGGLE: Mass Model vs Observations
+// =====================================================================
+// The segmented toggle lets users switch between two perspectives:
+//   "Mass Model"   -- GFD predicts from the user's photometric mass estimates.
+//                     Sliders are interactive. This is the default exploration mode.
+//   "Observations"  -- GFD derives the mass model directly from kinematic data.
+//                     Sliders show derived values. Pure first-principles result.
 // =====================================================================
 
-function setMode(mode) {
-    // Remember the current galaxy id before switching (including pinned state)
-    var previousId = currentExample ? currentExample.id :
-                     (pinnedGalaxyExample ? pinnedGalaxyExample.id : null);
+/**
+ * Initialise the view-mode toggle. Attaches click handlers to both
+ * segments and wires them to enterMassModelMode / enterObservationMode.
+ */
+function initViewModeToggle() {
+    var toggle = document.getElementById('view-mode-toggle');
+    if (!toggle) return;
+    var btns = toggle.querySelectorAll('.view-mode-btn');
+    btns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var mode = this.getAttribute('data-mode');
+            if (mode === 'observations' && !isAutoFitted) {
+                enterObservationMode();
+            } else if (mode === 'mass-model' && isAutoFitted) {
+                enterMassModelMode();
+            }
+        });
+    });
+}
 
-    currentMode = mode;
-    currentExample = null;
-    pinnedObservations = null;
-    pinnedGalaxyLabel = null;
-    pinnedGalaxyExample = null;
+/**
+ * Switch to Observation mode: show GFD Sigma and GFD Accel curves.
+ * Data is already loading/loaded from the background fetch kicked off
+ * on galaxy selection. Just toggles visibility.
+ */
+async function enterObservationMode() {
+    var toggle = document.getElementById('view-mode-toggle');
+    var obsBtn = toggle ? toggle.querySelector('[data-mode="observations"]') : null;
+    var mmBtn  = toggle ? toggle.querySelector('[data-mode="mass-model"]') : null;
 
-    document.getElementById('mode-prediction').classList.toggle('active', mode === 'prediction');
-    document.getElementById('mode-inference').classList.toggle('active', mode === 'inference');
+    isAutoFitted = true;
 
-    // Update distance label for context
-    distanceLabel.textContent = mode === 'inference' ? 'Chart Range (r)' : 'Distance Scale (r)';
+    if (mmBtn)  mmBtn.classList.remove('active');
+    if (obsBtn) obsBtn.classList.add('active');
 
-    if (mode === 'prediction') {
-        velocityControl.style.display = 'none';
-        inferenceResult.classList.remove('visible');
-        document.getElementById('mass-model-section').style.display = '';
-        document.getElementById('mass-slider-group').style.display = 'none';
-        // Hide multi-point panel and chart overlays in prediction mode
-        var multiDiv = document.getElementById('multi-inference-result');
-        if (multiDiv) multiDiv.style.display = 'none';
-        clearInferenceChart();
-        // In prediction mode, mass sliders are directly editable
-        setMassSliderEditable(true);
-        // Unlock any locked chips from inference mode
-        unlockAllChips();
-        // Update header text
-        document.querySelector('.mass-model-header-text').textContent = 'Mass Distribution';
-    } else {
-        velocityControl.style.display = 'block';
-        inferenceResult.classList.add('visible');
-        // Show mass distribution in inference mode too (shape controls)
-        document.getElementById('mass-model-section').style.display = '';
-        document.getElementById('mass-slider-group').style.display = 'none';
-        // In inference mode, mass values are auto-computed (read-only feel)
-        // but scale lengths remain editable (user controls the shape)
-        setMassSliderEditable(false);
-        // Update header to indicate shape mode
-        document.querySelector('.mass-model-header-text').textContent = 'Mass Distribution Shape (masses auto-inferred)';
-
-        // Force GFD and GFD-sigma chips on and lock them (required for inference)
-        forceChipOn('gfd');
-        forceChipOn('gfd_symmetric');
+    document.getElementById('mass-model-panel').style.display = 'none';
+    var obsPanel = document.getElementById('observation-mass-panel');
+    if (obsPanel) {
+        obsPanel.style.display = '';
+        populateObservationMassPanel();
     }
 
-    updateExamplesDropdown();
+    showObsTabs();
+    blankRightPaneMetrics();
 
-    // If a galaxy was loaded, find the same galaxy in the new mode and load it
-    if (previousId) {
-        // Normalize id: strip _inference suffix and handle mw -> milky_way
-        var baseId = previousId.replace(/_inference$/, '');
-        if (baseId === 'mw') baseId = 'milky_way';
-        var galaxies = galaxyCatalog[currentMode] || [];
-        var matchIndex = galaxies.findIndex(function(g) {
-            var gBase = g.id.replace(/_inference$/, '');
-            if (gBase === 'mw') gBase = 'milky_way';
-            return gBase === baseId;
+    // Show GFD (Observed) chip only (GFD Sigma chip removed from badges)
+    var accelChip = document.querySelector('.theory-chip[data-series="gfd_accel"]');
+    if (accelChip) accelChip.style.display = '';
+
+    // Wait for observation data if still loading from prefetch
+    var hasObsData = sandboxResult && sandboxResult.chart &&
+        sandboxResult.chart.gfd_spline &&
+        sandboxResult.chart.gfd_spline.length > 0;
+
+    if (!hasObsData && observationFetchPromise) {
+        showChartLoading();
+        await observationFetchPromise;
+        hideChartLoading();
+    }
+
+    chart.data.datasets[10].hidden = true;   // Spline line off; only purple GFD (Observed) (dataset 11)
+    chart.data.datasets[11].hidden = false;
+
+    var vpsPanel = document.getElementById('vps-panel');
+    if (vpsPanel) vpsPanel.style.display = '';
+    ensureVpsChart();
+    renderSandboxCurves();
+    updateVpsChart();
+}
+
+/**
+ * Switch back to Mass Model mode: show only Observed Data + GFD Photometric.
+ */
+function enterMassModelMode() {
+    isAutoFitted = false;
+
+    var toggle = document.getElementById('view-mode-toggle');
+    if (toggle) {
+        var mmBtn  = toggle.querySelector('[data-mode="mass-model"]');
+        var obsBtn = toggle.querySelector('[data-mode="observations"]');
+        if (mmBtn)  mmBtn.classList.add('active');
+        if (obsBtn) obsBtn.classList.remove('active');
+    }
+
+    document.getElementById('observation-mass-panel').style.display = 'none';
+    document.getElementById('mass-model-panel').style.display = '';
+    var vpsPanel = document.getElementById('vps-panel');
+    if (vpsPanel) vpsPanel.style.display = 'none';
+    updateResetToPhotometricButton();
+
+    // Hide GFD (Observed) chip and observation-derived curves (datasets 10, 11)
+    var accelChip = document.querySelector('.theory-chip[data-series="gfd_accel"]');
+    if (accelChip) accelChip.style.display = 'none';
+    chart.data.datasets[10].hidden = true;
+    chart.data.datasets[11].hidden = true;
+
+    // Old Bayesian sigma stays hidden
+    chart.data.datasets[8].hidden = true;
+
+    // Keep Chart and Observation Data tabs visible in Mass Model mode; show chart view
+    if (pinnedObservations && pinnedObservations.length > 0) {
+        showObsTabs();
+        var theoryToggles = document.getElementById('theory-toggles');
+        var chartContainer = document.querySelector('.chart-container');
+        var obsFace = document.getElementById('obs-data-face');
+        var fieldFace = document.getElementById('field-analysis-face');
+        var rightPanel = document.querySelector('.right-panel');
+        if (theoryToggles) theoryToggles.style.display = '';
+        if (chartContainer) chartContainer.style.display = '';
+        if (obsFace) obsFace.style.display = 'none';
+        if (fieldFace) fieldFace.style.display = 'none';
+        if (rightPanel) rightPanel.classList.remove('obs-data-active');
+        var tabBar = document.getElementById('obs-tab-bar');
+        if (tabBar) {
+            var tabs = tabBar.querySelectorAll('.obs-tab');
+            tabs.forEach(function(t) {
+                t.classList.toggle('active', t.getAttribute('data-tab') === 'chart');
+            });
+        }
+    } else {
+        hideObsTabs();
+    }
+
+    // Blank right pane metrics
+    blankRightPaneMetrics();
+
+    // Re-render to apply Mass Model mode display (R_env only, no R_t/band)
+    renderSandboxCurves();
+}
+
+/**
+ * Legacy entry point kept for backward compatibility (global onclick).
+ * Toggles between Mass Model and Observation modes.
+ */
+function runAutoFit() {
+    if (isAutoFitted) {
+        enterMassModelMode();
+    } else {
+        enterObservationMode();
+    }
+}
+
+/**
+ * Reset the view-mode toggle to Mass Model (default). Called when
+ * loading a new galaxy or when sliders are manually adjusted.
+ */
+function resetViewModeToggle() {
+    var toggle = document.getElementById('view-mode-toggle');
+    if (!toggle) return;
+    var mmBtn  = toggle.querySelector('[data-mode="mass-model"]');
+    var obsBtn = toggle.querySelector('[data-mode="observations"]');
+    if (mmBtn)  mmBtn.classList.add('active');
+    if (obsBtn) obsBtn.classList.remove('active', 'loading');
+    // Ensure observation data tabs are hidden when resetting
+    hideObsTabs();
+}
+
+// =====================================================================
+// OBSERVATION DATA TABS (Chart | Observation Data)
+// =====================================================================
+
+/**
+ * Initialise click handlers for the observation mode tab bar.
+ * Switches between the chart view and the observation data table.
+ */
+function initObsTabs() {
+    var tabBar = document.getElementById('obs-tab-bar');
+    if (!tabBar) return;
+    var tabs = tabBar.querySelectorAll('.obs-tab');
+    tabs.forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            var target = this.getAttribute('data-tab');
+            // Update active tab styling
+            tabs.forEach(function(t) { t.classList.remove('active'); });
+            this.classList.add('active');
+            // Elements controlled by tab switching
+            var theoryToggles    = document.getElementById('theory-toggles');
+            var chartContainer   = document.querySelector('.chart-container');
+            var obsFace          = document.getElementById('obs-data-face');
+            var fieldFace        = document.getElementById('field-analysis-face');
+            var rightPanel       = document.querySelector('.right-panel');
+
+            // Default: hide all content panels
+            if (theoryToggles)  theoryToggles.style.display  = 'none';
+            if (chartContainer) chartContainer.style.display = 'none';
+            if (obsFace)        obsFace.style.display        = 'none';
+            if (fieldFace)      fieldFace.style.display      = 'none';
+            if (rightPanel) rightPanel.classList.remove('obs-data-active');
+
+            if (target === 'chart') {
+                if (theoryToggles)  theoryToggles.style.display  = '';
+                if (chartContainer) chartContainer.style.display = '';
+            } else if (target === 'data') {
+                if (obsFace) obsFace.style.display = '';
+                if (rightPanel) rightPanel.classList.add('obs-data-active');
+            } else if (target === 'field-analysis') {
+                if (fieldFace) fieldFace.style.display = '';
+                if (rightPanel) rightPanel.classList.add('obs-data-active');
+                // Lazy-load field analysis content on first view
+                loadFieldAnalysis();
+            }
         });
-        if (matchIndex >= 0) {
-            var dropdown = document.getElementById('examples-dropdown');
-            dropdown.value = String(matchIndex + 1);
-            loadExample();
-            return;
+    });
+}
+
+/**
+ * Show the observation tab bar and populate the observation data content.
+ * Renders a markdown-preview style layout grouped by data source.
+ * Called when entering Observation mode.
+ */
+function showObsTabs() {
+    var tabBar = document.getElementById('obs-tab-bar');
+    if (tabBar) tabBar.style.display = '';
+
+    var container = document.getElementById('obs-data-content');
+    if (!container) return;
+
+    var obs = pinnedObservations;
+    var example = pinnedGalaxyExample || currentExample;
+    var galaxyName = example ? example.name.replace(/\s*\(.*\)/, '') : 'Galaxy';
+
+    if (!obs || obs.length === 0) {
+        container.innerHTML = '<p style="color:#606060;">No observation data available.</p>';
+        return;
+    }
+
+    // Group observations by source. Use obs.src if present, otherwise
+    // derive a default from the galaxy's first reference.
+    var groups = [];
+    var groupMap = {};
+    var defaultSrc = 'Published data';
+    if (example && example.references && example.references.length > 0) {
+        // Extract short author+year from the first rotation curve reference
+        defaultSrc = example.references[0];
+    }
+
+    for (var i = 0; i < obs.length; i++) {
+        var src = obs[i].src || defaultSrc;
+        if (!groupMap[src]) {
+            groupMap[src] = { src: src, points: [] };
+            groups.push(groupMap[src]);
+        }
+        groupMap[src].points.push(obs[i]);
+    }
+
+    // Build markdown-preview style HTML
+    var html = '';
+    html += '<h2>' + galaxyName + '</h2>';
+    html += '<div class="obs-summary">' + obs.length + ' observations across '
+          + groups.length + ' source' + (groups.length > 1 ? 's' : '') + '</div>';
+
+    for (var g = 0; g < groups.length; g++) {
+        var grp = groups[g];
+        var radii = grp.points.map(function(p) { return p.r; });
+        var minR = Math.min.apply(null, radii).toFixed(1);
+        var maxR = Math.max.apply(null, radii).toFixed(1);
+
+        html += '<div class="obs-source-group">';
+        html += '<h3>' + grp.src + '</h3>';
+        html += '<div class="obs-source-meta">'
+              + grp.points.length + ' point' + (grp.points.length > 1 ? 's' : '')
+              + ', ' + minR + ' \u2013 ' + maxR + ' kpc</div>';
+
+        html += '<table class="obs-data-table">';
+        html += '<thead><tr>'
+              + '<th>r (kpc)</th>'
+              + '<th>v (km/s)</th>'
+              + '<th>err (km/s)</th>'
+              + '</tr></thead><tbody>';
+
+        for (var p = 0; p < grp.points.length; p++) {
+            var pt = grp.points[p];
+            html += '<tr>';
+            html += '<td>' + pt.r.toFixed(1) + '</td>';
+            html += '<td>' + pt.v.toFixed(0) + '</td>';
+            html += '<td>' + (pt.err != null ? pt.err.toFixed(0) : '--') + '</td>';
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += '</div>';
+    }
+
+    // References at the bottom
+    if (example && example.references && example.references.length > 0) {
+        html += '<div class="obs-refs-section">';
+        html += '<h4>References</h4>';
+        for (var j = 0; j < example.references.length; j++) {
+            html += '<div>' + example.references[j] + '</div>';
+        }
+        html += '</div>';
+    }
+
+    container.innerHTML = html;
+}
+
+/**
+ * Hide the observation tab bar and ensure the chart face is visible.
+ * Called when returning to Mass Model mode or loading a new galaxy.
+ */
+function hideObsTabs() {
+    var tabBar = document.getElementById('obs-tab-bar');
+    if (tabBar) tabBar.style.display = 'none';
+
+    // Restore chart view: theory badges, chart container visible, all data panels hidden
+    var theoryToggles  = document.getElementById('theory-toggles');
+    var chartContainer = document.querySelector('.chart-container');
+    var obsFace        = document.getElementById('obs-data-face');
+    var fieldFace      = document.getElementById('field-analysis-face');
+    var rightPanel     = document.querySelector('.right-panel');
+    if (theoryToggles)  theoryToggles.style.display  = '';
+    if (chartContainer) chartContainer.style.display = '';
+    if (obsFace)        obsFace.style.display        = 'none';
+    if (fieldFace)      fieldFace.style.display      = 'none';
+    if (rightPanel)     rightPanel.classList.remove('obs-data-active');
+
+    // Clear cached field analysis so it re-fetches on next open
+    _fieldAnalysisLoaded = false;
+
+    // Reset active tab to "Chart"
+    if (tabBar) {
+        var tabs = tabBar.querySelectorAll('.obs-tab');
+        tabs.forEach(function(t) {
+            t.classList.toggle('active', t.getAttribute('data-tab') === 'chart');
+        });
+    }
+}
+
+// =====================================================================
+// FIELD ANALYSIS TAB (GFD metrics + equation display)
+// =====================================================================
+
+// Cache flag so we only fetch once per observation mode session.
+var _fieldAnalysisLoaded = false;
+var _fieldAnalysisData = null;
+
+/**
+ * Fetch field analysis metrics from the backend and render them into
+ * the Field Analysis tab content area. Uses the current slider values
+ * and the fitted Origin Throughput from the last inference run.
+ */
+async function loadFieldAnalysis() {
+    if (_fieldAnalysisLoaded && _fieldAnalysisData) {
+        return;
+    }
+
+    var container = document.getElementById('field-analysis-content');
+    if (!container) return;
+
+    container.innerHTML = '<p class="fa-loading">Loading field analysis...</p>';
+
+    var massModel = getMassModelFromSliders();
+    var gr = parseFloat(galacticRadiusSlider.value) || 0;
+    var accelRatio = parseFloat(accelSlider.value) || 1.0;
+
+    var throughput = autoVortexStrength;
+    if (throughput === null && vortexStrengthSlider) {
+        throughput = parseFloat(vortexStrengthSlider.value);
+    }
+    if (!throughput || gr <= 0) {
+        container.innerHTML = '<p class="fa-loading">Observation data required for field analysis.</p>';
+        return;
+    }
+
+    try {
+        var resp = await fetch('/api/rotation/field_analysis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mass_model: massModel,
+                galactic_radius: gr,
+                vortex_strength: throughput,
+                accel_ratio: accelRatio
+            })
+        });
+        if (!resp.ok) throw new Error('API error: ' + resp.status);
+        _fieldAnalysisData = await resp.json();
+        _fieldAnalysisLoaded = true;
+        renderFieldAnalysis(container, _fieldAnalysisData);
+    } catch (err) {
+        console.error('Field analysis error:', err);
+        container.innerHTML = '<p style="color: #ff6b6b;">Failed to load field analysis.</p>';
+    }
+}
+
+/**
+ * Post-render KaTeX pass. After innerHTML is set, find all elements
+ * with data-katex attributes and render them with KaTeX. This avoids
+ * timing issues with deferred script loading and ensures the DOM is
+ * ready before KaTeX processes each expression.
+ */
+function renderKatexElements(root) {
+    if (typeof katex === 'undefined') return;
+    var els = root.querySelectorAll('[data-katex]');
+    for (var i = 0; i < els.length; i++) {
+        var latex = els[i].getAttribute('data-katex');
+        try {
+            katex.render(latex, els[i], {
+                displayMode: false,
+                throwOnError: false
+            });
+        } catch (e) {
+            els[i].textContent = latex;
         }
     }
+}
 
-    updateDisplays();
-    updateChart();
+/**
+ * Build the Field Analysis tab content from the API response.
+ * Structured as an engineering classification report: prioritised
+ * sections, collapsible panels, clean enterprise typography.
+ */
+function renderFieldAnalysis(container, data) {
+    var galaxyName = '';
+    var example = pinnedGalaxyExample || currentExample;
+    if (example) {
+        galaxyName = example.name.replace(/\s*\(.*\)/, '');
+    }
+
+    var h = '';
+
+    // --- Report Header ---
+    h += '<div class="fa-report-header">';
+    h += '<div class="fa-report-id">FIELD ANALYSIS REPORT</div>';
+    h += '<h2 class="fa-report-name">' + (galaxyName || 'UNKNOWN SYSTEM') + '</h2>';
+    h += '</div>';
+
+    // =========================================================
+    // SECTION 1: FITTED MODEL (open)
+    // =========================================================
+    var pe = data.parametric;
+    if (pe) {
+        h += _faSection('fitted-model', 'Fitted Model', true);
+        h += '<p class="fa-prose">Complete callable equation with all resolved parameters.'
+           + ' Reproduces the rotation curve without the GFD pipeline.</p>';
+
+        h += '<p class="fa-step-label">1. Enclosed mass profiles'
+           + ' <span class="fa-step-note">(Hernquist bulge + exponential disk + gas)</span></p>';
+        h += _eqBlock(pe.mass_bulge);
+        h += _eqBlock(pe.mass_disk);
+        h += _eqBlock(pe.mass_gas);
+        h += _eqBlock(pe.mass_total);
+
+        h += '<p class="fa-step-label">2. Newtonian acceleration</p>';
+        h += _eqBlock(pe.g_newtonian);
+
+        h += '<p class="fa-step-label">3. GFD field solve</p>';
+        h += _eqBlock(pe.gfd_solve);
+
+        h += '<p class="fa-step-label">4a. Structural correction'
+           + ' <span class="fa-step-note">(outer arm, r > R<sub>t</sub>)</span></p>';
+        h += _eqBlock(pe.throughput_outer);
+
+        if (pe.vortex_reflect) {
+            h += '<p class="fa-step-label">4b. Vortex reflection'
+               + ' <span class="fa-step-note">(inner arm, r &le; R<sub>t</sub>)</span></p>';
+            h += _eqBlock(pe.vortex_reflect);
+        }
+
+        h += '<p class="fa-step-label">5. Circular velocity</p>';
+        h += _eqBlock(pe.velocity_final);
+
+        h += '<div class="fa-constants-block">';
+        h += _eqBlock(pe.constants);
+        h += _eqBlock(pe.units);
+        h += '</div>';
+
+        h += '</div></div>';
+    }
+
+    // =========================================================
+    // SECTION 2: FIELD GEOMETRY (open)
+    // =========================================================
+    var fg = data.field_geometry;
+    if (fg) {
+        h += _faSection('field-geom', 'Field Geometry', true);
+
+        // Geometry comparison: from observation (topological) vs profile (catalog)
+        var hasPredicted = fg.predicted_origin_kpc !== null && fg.predicted_origin_kpc !== undefined;
+        if (hasPredicted) {
+            // Build a delta badge with color coding
+            function _deltaBadge(val) {
+                if (val === null || val === undefined) return '<span style="color:#888;">N/A</span>';
+                var abs = Math.abs(val);
+                var color = abs < 3 ? '#4caf50' : abs < 10 ? '#ff9800' : '#ff6b6b';
+                return '<span style="color:' + color + '; font-weight:600;">'
+                     + (val >= 0 ? '+' : '') + val.toFixed(1) + '%</span>';
+            }
+
+            h += '<p class="fa-step-label">Derived from Mass Model vs Galaxy Profile</p>';
+            h += '<table class="fa-table">';
+            h += '<tr class="fa-row fa-row-header">'
+               + '<td class="fa-label"></td>'
+               + '<td class="fa-symbol"></td>'
+               + '<td class="fa-value" style="text-align:right; font-weight:600; color:#9ecfff;">From Observation</td>'
+               + '<td class="fa-value" style="text-align:right; color:#888;">Profile</td>'
+               + '<td class="fa-value" style="text-align:right;">&Delta;</td>'
+               + '</tr>';
+            h += '<tr class="fa-row">'
+               + '<td class="fa-label">Field Origin</td>'
+               + '<td class="fa-symbol">' + _katexInline('R_t') + '</td>'
+               + '<td class="fa-value" style="text-align:right; font-weight:600;">' + fg.predicted_origin_kpc + ' kpc</td>'
+               + '<td class="fa-value" style="text-align:right; color:#888;">' + fg.catalog_origin_kpc + ' kpc</td>'
+               + '<td class="fa-value" style="text-align:right;">' + _deltaBadge(fg.origin_delta_pct) + '</td>'
+               + '</tr>';
+            h += '<tr class="fa-row">'
+               + '<td class="fa-label">Field Horizon</td>'
+               + '<td class="fa-symbol">' + _katexInline('R_{\\mathrm{env}}') + '</td>'
+               + '<td class="fa-value" style="text-align:right; font-weight:600;">' + fg.predicted_horizon_kpc + ' kpc</td>'
+               + '<td class="fa-value" style="text-align:right; color:#888;">' + fg.catalog_horizon_kpc + ' kpc</td>'
+               + '<td class="fa-value" style="text-align:right;">' + _deltaBadge(fg.horizon_delta_pct) + '</td>'
+               + '</tr>';
+            h += '<tr class="fa-row">'
+               + '<td class="fa-label">Throat Fraction</td>'
+               + '<td class="fa-symbol">' + _katexInline('R_t / R_{\\mathrm{env}}') + '</td>'
+               + '<td class="fa-value" style="text-align:right; font-weight:600;">' + fg.throat_fraction + '</td>'
+               + '<td class="fa-value" style="text-align:right; color:#888;">0.3000</td>'
+               + '<td class="fa-value" style="text-align:right;"></td>'
+               + '</tr>';
+            h += '</table>';
+            if (fg.yN_at_throat !== null && fg.yN_at_throat !== undefined) {
+                h += '<p class="fa-prose" style="margin-top:8px;">'
+                   + 'Throat condition: ' + _katexInline('y_N(R_t) = 18/65')
+                   + ' &nbsp; Measured: ' + fg.yN_at_throat
+                   + ' &nbsp; Method: ' + fg.prediction_method + '</p>';
+            }
+        } else {
+            h += '<p class="fa-prose" style="margin-top:4px; color:#ff9800;">Deep-field system: '
+               + 'y<sub>N</sub> never reaches 18/65. Catalog geometry used.</p>';
+            h += '<table class="fa-table">';
+            h += _faRow('Field Origin (profile)', _katexInline('R_t'), fg.catalog_origin_kpc + ' kpc');
+            h += _faRow('Field Horizon (profile)', _katexInline('R_{\\mathrm{env}}'), fg.catalog_horizon_kpc + ' kpc');
+            h += '</table>';
+        }
+
+        // Throughput and throat fraction
+        h += '<table class="fa-table" style="margin-top:12px;">';
+        h += _faRow('Throat Fraction', _katexInline('R_t / R_{\\mathrm{env}}'), fg.throat_fraction);
+        h += _faRow('Origin Throughput (fitted)', _katexInline('\\sigma'), fg.origin_throughput_fitted);
+        h += _faRow('Origin Throughput (theoretical)', '', fg.origin_throughput_theoretical);
+        h += _faRow('Throughput Delta', '', _signed(fg.throughput_delta_pct) + '%');
+        h += '</table>';
+        h += '</div></div>';
+    }
+
+    // =========================================================
+    // SECTION 3: RESOLVED MASS (open)
+    // =========================================================
+    var mp = data.mass_properties;
+    if (mp) {
+        h += _faSection('resolved-mass', 'Resolved Mass', true);
+        h += '<table class="fa-table">';
+        h += _faRow('Total Baryonic', _katexInline('M_{\\mathrm{bary}}'), _sciNot(mp.total_baryonic_Msun) + ' M<sub>&#x2609;</sub>');
+        h += _faRow('Stellar Bulge', _katexInline('M_{\\mathrm{b}}'), _sciNot(mp.bulge_Msun) + ' M<sub>&#x2609;</sub>');
+        h += _faRow('Stellar Disk', _katexInline('M_{\\mathrm{d}}'), _sciNot(mp.disk_Msun) + ' M<sub>&#x2609;</sub>');
+        h += _faRow('Gas Disk', _katexInline('M_{\\mathrm{g}}'), _sciNot(mp.gas_Msun) + ' M<sub>&#x2609;</sub>');
+        h += _faRow('Gas Fraction', _katexInline('f_{\\mathrm{gas}}'), (mp.gas_fraction * 100).toFixed(1) + '%');
+        h += _faRow('Bulge / Total', _katexInline('B/T'), (mp.bulge_to_total * 100).toFixed(1) + '%');
+        h += '</table>';
+        h += '</div></div>';
+    }
+
+    // =========================================================
+    // SECTION 4: VELOCITY PROFILE (collapsed)
+    // =========================================================
+    var dyn = data.dynamics;
+    if (dyn) {
+        h += _faSection('velocity', 'Velocity Profile', false);
+        h += '<table class="fa-table">';
+        h += _faRow('Peak velocity (GFD base)', '', dyn.v_peak_gfd_kms + ' km/s at ' + dyn.r_peak_gfd_kpc + ' kpc');
+        h += _faRow('Peak velocity (observed)', '', dyn.v_peak_observed_kms + ' km/s at ' + dyn.r_peak_observed_kpc + ' kpc');
+        h += _faRow('v at Field Origin (base)', '', dyn.v_at_origin_gfd_kms + ' km/s');
+        h += _faRow('v at Field Origin (observed)', '', dyn.v_at_origin_observed_kms + ' km/s');
+        h += _faRow('v at Field Horizon (base)', '', dyn.v_at_horizon_gfd_kms + ' km/s');
+        h += _faRow('v at Field Horizon (observed)', '', dyn.v_at_horizon_observed_kms + ' km/s');
+        if (dyn.r_transition_kpc > 0) {
+            h += _faRow('Transition radius (y<sub>N</sub> = 1)', _katexInline('r_{\\mathrm{trans}}'), dyn.r_transition_kpc + ' kpc');
+        }
+        h += '</table>';
+        h += '</div></div>';
+    }
+
+    // =========================================================
+    // SECTION 5: STRUCTURAL CORRECTION (collapsed)
+    // =========================================================
+    var te = data.throughput_effect;
+    if (te) {
+        h += _faSection('struct-corr', 'Structural Correction', false);
+        h += '<table class="fa-table">';
+        h += _faRow('Delta v at Origin', _katexInline('\\Delta v(R_t)'), _signed(te.delta_v_at_origin_kms) + ' km/s');
+        h += _faRow('Delta v at Horizon', _katexInline('\\Delta v(R_{\\mathrm{env}})'), _signed(te.delta_v_at_horizon_kms) + ' km/s');
+        h += _faRow('Delta % at Horizon', '', _signed(te.delta_pct_at_horizon) + '%');
+        h += _faRow('GFD / Newtonian at Origin', '', te.gfd_newt_ratio_at_origin + 'x');
+        h += _faRow('GFD / Newtonian at Horizon', '', te.gfd_newt_ratio_at_horizon + 'x');
+        h += '</table>';
+        h += '</div></div>';
+    }
+
+    // =========================================================
+    // SECTION 6: FIELD CONSTANTS (collapsed)
+    // =========================================================
+    var fc = data.field_coupling;
+    if (fc) {
+        h += _faSection('field-const', 'Field Constants', false);
+        h += '<table class="fa-table">';
+        h += _faRow('Acceleration scale', _katexInline('a_0'), fc.a0_ms2.toExponential(4) + ' m/s<sup>2</sup>');
+        h += _faRow('Simplex number', _katexInline('k'), fc.k_simplex);
+        h += _faRow('y<sub>N</sub> at Field Origin', _katexInline('y_N(R_t)'), fc.yN_at_origin);
+        h += _faRow('y<sub>N</sub> at Field Horizon', _katexInline('y_N(R_{\\mathrm{env}})'), fc.yN_at_horizon);
+        h += _faRow('Effective coupling', _katexInline('f_{\\mathrm{eff}}'), fc.f_eff);
+        h += _faRow('Structural release amplitude', _katexInline('g_0'), fc.g0_ms2.toExponential(4) + ' m/s<sup>2</sup>');
+        h += _faRow('Structural fraction', '', fc.structural_frac);
+        h += _faRow('Outer power law', '', fc.power_law);
+        h += '</table>';
+        h += '</div></div>';
+    }
+
+    // =========================================================
+    // SECTION 7: THEORY REFERENCE (collapsed)
+    // =========================================================
+    if (data.equations) {
+        h += _faSection('theory-ref', 'Theory Reference', false);
+        h += '<p class="fa-prose">The complete GFD derivation chain, from the covariant action'
+           + ' through to the velocity formula. All terms are fixed by the topology'
+           + ' of the stellated octahedron.</p>';
+
+        h += '<p class="fa-step-label">Covariant Action</p>';
+        h += _eqBlock(data.equations.action);
+
+        h += '<p class="fa-step-label">Coupling Polynomial'
+           + ' <span class="fa-step-note">(stellated octahedron)</span></p>';
+        h += _eqBlock(data.equations.coupling_poly);
+
+        h += '<p class="fa-step-label">Scalar Lagrangian</p>';
+        h += _eqBlock(data.equations.lagrangian);
+
+        h += '<p class="fa-step-label">Algebraic Field Equation'
+           + ' <span class="fa-step-note">(Euler-Lagrange in spherical symmetry)</span></p>';
+        h += _eqBlock(data.equations.field_eq);
+
+        h += '<p class="fa-step-label">Analytic Solution</p>';
+        h += _eqBlock(data.equations.solution);
+
+        h += '<p class="fa-step-label">Circular Velocity</p>';
+        h += _eqBlock(data.equations.velocity);
+
+        h += '<p class="fa-step-label">Acceleration Scale'
+           + ' <span class="fa-step-note">(zero free parameters)</span></p>';
+        h += _eqBlock(data.equations.acceleration_scale);
+
+        h += '</div></div>';
+    }
+
+    container.innerHTML = h;
+
+    // Post-render: KaTeX processes all data-katex elements
+    renderKatexElements(container);
+
+    // Wire collapsible section headers
+    _wireFaCollapse(container);
+}
+
+/**
+ * Build the opening HTML for a collapsible field analysis section.
+ * Returns the header + opening body div. Caller must close with </div></div>.
+ */
+function _faSection(id, title, open) {
+    var cls = open ? 'fa-section' : 'fa-section fa-collapsed';
+    var chevron = open ? '&#9660;' : '&#9654;';
+    return '<div class="' + cls + '" data-fa-section="' + id + '">'
+         + '<div class="fa-section-header" onclick="_toggleFaSection(this)">'
+         + '<span class="fa-chevron">' + chevron + '</span>'
+         + '<h3>' + title + '</h3>'
+         + '</div>'
+         + '<div class="fa-section-body"' + (open ? '' : ' style="display:none"') + '>';
+}
+
+/** Toggle a collapsible field analysis section. */
+function _toggleFaSection(headerEl) {
+    var section = headerEl.parentElement;
+    var body = headerEl.nextElementSibling;
+    var chevron = headerEl.querySelector('.fa-chevron');
+    if (!body) return;
+    if (body.style.display === 'none') {
+        body.style.display = '';
+        chevron.innerHTML = '&#9660;';
+        section.classList.remove('fa-collapsed');
+    } else {
+        body.style.display = 'none';
+        chevron.innerHTML = '&#9654;';
+        section.classList.add('fa-collapsed');
+    }
+}
+
+/** Wire collapse handlers after innerHTML render. */
+function _wireFaCollapse(container) {
+    // KaTeX elements inside initially-hidden sections need rendering
+    // when the section is first opened.
+    var sections = container.querySelectorAll('.fa-section[data-fa-section]');
+    sections.forEach(function(sec) {
+        var header = sec.querySelector('.fa-section-header');
+        if (!header) return;
+        var body = sec.querySelector('.fa-section-body');
+        if (!body) return;
+        var rendered = !sec.classList.contains('fa-collapsed');
+        header.addEventListener('click', function() {
+            if (!rendered) {
+                renderKatexElements(body);
+                rendered = true;
+            }
+        });
+    });
+}
+
+/** Build a left-aligned block equation placeholder for post-render KaTeX. */
+function _eqBlock(latex) {
+    return '<div class="fa-eq" data-katex="' + _escAttr(latex) + '"></div>';
+}
+
+/** Build an inline KaTeX placeholder span (rendered in post-pass). */
+function _katexInline(latex) {
+    return '<span class="fa-sym" data-katex="' + _escAttr(latex) + '"></span>';
+}
+
+/** Escape a string for safe use inside an HTML attribute. */
+function _escAttr(s) {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Build a three-column metrics row: label, symbol, value. */
+function _faRow(label, sym, value) {
+    return '<tr>'
+         + '<td class="fa-label">' + label + '</td>'
+         + '<td class="fa-sym-cell">' + sym + '</td>'
+         + '<td class="fa-value">' + value + '</td>'
+         + '</tr>';
+}
+
+/** Format a solar mass value in compact scientific notation. */
+function _sciNot(val) {
+    if (val === 0 || val == null) return '0';
+    return parseFloat(val).toExponential(3);
+}
+
+/** Prefix positive numbers with +, leave negatives as-is. */
+function _signed(val) {
+    var n = parseFloat(val);
+    if (isNaN(n)) return val;
+    return (n >= 0 ? '+' : '') + val;
+}
+
+// =====================================================================
+// FONT SIZE CONTROLS (Observation Data + Field Analysis tabs)
+// =====================================================================
+
+var _obsFontSizes = [0.75, 0.85, 1.0, 1.15, 1.3];
+var _obsFontIndex = 2;
+
+/**
+ * Wire up all A-/A+ buttons inside .obs-data-face panels.
+ * Each button steps the shared font index and applies to all
+ * .obs-data-content elements simultaneously.
+ */
+function initObsFontControls() {
+    var btns = document.querySelectorAll('.obs-font-btn');
+    btns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var dir = parseInt(this.getAttribute('data-dir'));
+            _obsFontIndex = Math.max(0, Math.min(_obsFontSizes.length - 1, _obsFontIndex + dir));
+            var size = _obsFontSizes[_obsFontIndex] + 'em';
+            var panels = document.querySelectorAll('.obs-data-content');
+            panels.forEach(function(p) { p.style.fontSize = size; });
+        });
+    });
 }
 
 // Toggle mass value sliders between editable (prediction) and read-only output (inference)
@@ -2053,6 +4028,16 @@ accelSlider.addEventListener('input', () => {
 });
 
 // =====================================================================
+// RESET TO PHOTOMETRIC BUTTON (Mass Model panel)
+// =====================================================================
+var resetToPhotometricBtn = document.getElementById('reset-to-photometric-btn');
+if (resetToPhotometricBtn) {
+    resetToPhotometricBtn.addEventListener('click', function() {
+        resetToPhotometric();
+    });
+}
+
+// =====================================================================
 // BAND METHOD SELECTOR
 // =====================================================================
 document.getElementById('band-method-select').addEventListener('change', async function() {
@@ -2091,8 +4076,241 @@ document.addEventListener('mouseup', () => {
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         chart.resize();
+        if (vpsChart) {
+            vpsChart.resize();
+            if (isAutoFitted) setTimeout(function() { updateVpsChart(); }, 0);
+        }
+    }
+    if (isResizingMetrics) {
+        isResizingMetrics = false;
+        metricsResizeHandle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        chart.resize();
+        if (vpsChart) {
+            vpsChart.resize();
+            if (isAutoFitted) setTimeout(function() { updateVpsChart(); }, 0);
+        }
     }
 });
+
+// =====================================================================
+// RIGHT METRICS PANEL RESIZE + COLLAPSE
+// =====================================================================
+
+const metricsPanel = document.getElementById('metrics-panel');
+const metricsResizeHandle = document.getElementById('metrics-resize-handle');
+let isResizingMetrics = false;
+let metricsWidthBeforeCollapse = 280;
+
+metricsResizeHandle.addEventListener('mousedown', () => {
+    if (metricsPanel.classList.contains('collapsed')) return;
+    isResizingMetrics = true;
+    metricsResizeHandle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (!isResizingMetrics) return;
+    var containerRight = metricsPanel.parentElement.getBoundingClientRect().right;
+    var newWidth = containerRight - e.clientX;
+    if (newWidth >= 280 && newWidth <= 600) {
+        metricsPanel.style.width = newWidth + 'px';
+        metricsPanel.style.minWidth = newWidth + 'px';
+        metricsWidthBeforeCollapse = newWidth;
+    }
+});
+
+function toggleMetricsPanel() {
+    var panel = metricsPanel;
+    if (panel.classList.contains('collapsed')) {
+        panel.classList.remove('collapsed');
+        panel.style.width = metricsWidthBeforeCollapse + 'px';
+        panel.style.minWidth = metricsWidthBeforeCollapse + 'px';
+    } else {
+        metricsWidthBeforeCollapse = parseInt(panel.style.width) || 280;
+        panel.classList.add('collapsed');
+    }
+    setTimeout(function() {
+        chart.resize();
+        if (vpsChart) {
+            vpsChart.resize();
+            if (isAutoFitted) updateVpsChart();
+        }
+    }, 250);
+}
+
+// =====================================================================
+// METRICS PANEL: VERTICAL SPLIT PANE
+// =====================================================================
+
+var metricsPaneTop = document.getElementById('metrics-pane-top');
+var metricsPaneBottom = document.getElementById('metrics-pane-bottom');
+var metricsPaneDivider = document.getElementById('metrics-pane-divider');
+var isResizingPane = false;
+
+if (metricsPaneDivider) {
+    metricsPaneDivider.addEventListener('mousedown', function(e) {
+        isResizingPane = true;
+        metricsPaneDivider.classList.add('dragging');
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+}
+
+document.addEventListener('mousemove', function(e) {
+    if (!isResizingPane) return;
+    var panelRect = metricsPanel.getBoundingClientRect();
+    var offsetY = e.clientY - panelRect.top;
+    var panelH = panelRect.height;
+    var minPx = 100;
+    var maxPx = panelH - 100;
+    if (offsetY < minPx) offsetY = minPx;
+    if (offsetY > maxPx) offsetY = maxPx;
+    metricsPaneTop.style.height = offsetY + 'px';
+    metricsPaneTop.style.flex = 'none';
+    metricsPaneBottom.style.flex = '1';
+});
+
+document.addEventListener('mouseup', function() {
+    if (isResizingPane) {
+        isResizingPane = false;
+        metricsPaneDivider.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    }
+});
+
+/**
+ * Show the auto-map diagnostics pane with gene report data.
+ */
+function showAutoMapDiagnostics(data) {
+    if (!metricsPaneTop || !data) return;
+
+    // Update header to reflect fit method
+    var headerText = document.querySelector('#metrics-automap-summary .metrics-header-text');
+    if (headerText) {
+        var method = data.throughput_fit && data.throughput_fit.method;
+        if (method && method === 'inference') {
+            headerText.textContent = 'Observation Results (derived)';
+        } else {
+            headerText.textContent = 'Observation Results';
+        }
+    }
+
+    // Summary metrics
+    var fit = data.throughput_fit;
+    if (fit) {
+        document.getElementById('metric-am-gfd-rms').textContent =
+            fit.gfd_rms_km_s != null ? fit.gfd_rms_km_s.toFixed(1) + ' km/s' : '--';
+        var chi2El = document.getElementById('metric-am-chi2');
+        if (fit.chi2_dof != null) {
+            chi2El.textContent = fit.chi2_dof.toFixed(2);
+            chi2El.className = 'metrics-value' + (fit.chi2_dof <= 1.5 ? ' good' : fit.chi2_dof <= 3 ? ' warn' : ' bad');
+        }
+    }
+
+    // Band coverage
+    var band = data.band_coverage;
+    if (band) {
+        document.getElementById('metric-am-band-hits').textContent =
+            band.obs_hits + '/' + band.obs_total;
+    }
+
+    // Field Geometry section: prefer topologically derived values from
+    // inferredFieldGeometry, fall back to slider + THROAT_FRAC constant.
+    var fg = inferredFieldGeometry;
+    var rEnv, rOrigin, throatRatio;
+    if (fg && fg.envelope_radius_kpc != null && fg.throat_radius_kpc != null) {
+        rEnv = fg.envelope_radius_kpc;
+        rOrigin = fg.throat_radius_kpc;
+        throatRatio = fg.throat_fraction != null ? fg.throat_fraction : (rEnv > 0 ? rOrigin / rEnv : 0);
+    } else {
+        rEnv = parseFloat(galacticRadiusSlider.value) || 0;
+        rOrigin = THROAT_FRAC * rEnv;
+        throatRatio = rEnv > 0 ? THROAT_FRAC : 0;
+    }
+    var throughputVal = data.auto_origin_throughput;
+
+    var fgThroughput = document.getElementById('metric-fg-throughput');
+    var fgOrigin = document.getElementById('metric-fg-origin');
+    var fgHorizon = document.getElementById('metric-fg-horizon');
+    var fgRatio = document.getElementById('metric-fg-ratio');
+
+    if (fgThroughput) fgThroughput.textContent = throughputVal != null ? throughputVal.toFixed(2) : '--';
+    if (fgOrigin) fgOrigin.textContent = rOrigin.toFixed(1) + ' kpc';
+    if (fgHorizon) fgHorizon.textContent = rEnv.toFixed(1) + ' kpc';
+    if (fgRatio) fgRatio.textContent = throatRatio > 0 ? throatRatio.toFixed(2) : '--';
+
+    // Gene report (parameter changes table)
+    var report = data.gene_report;
+    var tbody = document.getElementById('metrics-automap-tbody');
+    if (tbody && report && report.length > 0) {
+        var html = '';
+        for (var i = 0; i < report.length; i++) {
+            var g = report[i];
+            var pctChange = ((g.ratio - 1.0) * 100);
+            var pctStr = (pctChange >= 0 ? '+' : '') + pctChange.toFixed(1) + '%';
+            var sigStr = g.within_sigma ? '0' : g.sigma_excess.toFixed(1);
+            var chi2Str = g.chi2_bought > 0 ? '+' + g.chi2_bought.toFixed(1) : g.chi2_bought.toFixed(1);
+
+            var isMass = g.gene && (g.gene === 'Mb' || g.gene === 'Md' || g.gene === 'Mg');
+            var priorStr = isMass ? g.published.toExponential(3) : g.published.toFixed(2);
+            var postStr  = isMass ? g.fitted.toExponential(3) : g.fitted.toFixed(2);
+
+            var cls = '';
+            if (!g.within_sigma) {
+                cls = g.sigma_excess <= 1.0 ? 'sigma-warn' : 'sigma-bad';
+            } else {
+                cls = 'sigma-good';
+            }
+
+            html += '<tr class="' + cls + '">'
+                + '<td style="text-align:left;">' + g.name + '</td>'
+                + '<td>' + priorStr + '</td>'
+                + '<td>' + postStr + '</td>'
+                + '<td>' + pctStr + '</td>'
+                + '<td>' + sigStr + '</td>'
+                + '<td>' + chi2Str + '</td>'
+                + '</tr>';
+        }
+        tbody.innerHTML = html;
+    }
+
+    // Show the pane and activate split layout
+    metricsPaneTop.style.display = '';
+    metricsPaneDivider.style.display = '';
+
+    // Set initial 50/50 split
+    var panelH = metricsPanel.getBoundingClientRect().height;
+    metricsPaneTop.style.height = Math.floor(panelH * 0.5) + 'px';
+    metricsPaneTop.style.flex = 'none';
+    metricsPaneBottom.style.flex = '1';
+}
+
+/**
+ * Hide the auto-map diagnostics pane.
+ */
+function hideAutoMapDiagnostics() {
+    if (!metricsPaneTop) return;
+    metricsPaneTop.style.display = 'none';
+    metricsPaneDivider.style.display = 'none';
+    metricsPaneTop.style.height = '';
+    metricsPaneTop.style.flex = '';
+    metricsPaneBottom.style.flex = '';
+}
+
+function blankRightPaneMetrics() {
+    if (metricsPaneTop) {
+        metricsPaneTop.style.display = 'none';
+        metricsPaneDivider.style.display = 'none';
+    }
+    if (metricsPaneBottom) {
+        metricsPaneBottom.innerHTML = '';
+    }
+}
 
 // =====================================================================
 // THEORY TOGGLE BAR
@@ -2115,8 +4333,11 @@ function isChipEnabled(seriesKey) {
 var theoryDatasetMap = {
     'observed':      [3],       // Observed Data points
     'newtonian':     [0],       // Newtonian Gravity
-    'gfd':           [1, 4, 5], // GFD curve + confidence band upper/lower
-    'gfd_symmetric': [9],       // GFDsigma (Origin Throughput)
+    'gfd':           [1],       // GFD (Photometric)
+    'gfd_sigma_old': [8],       // Legacy Bayesian GFD Sigma (hidden)
+    'gfd_spline':    [10],      // GFD Sigma (fast observation fit)
+    'gfd_accel':     [11],      // GFD (with acceleration) -- 7-param fit
+    'gfd_symmetric': [9],       // Legacy GFD (Observed) - hidden
     'mond':          [2],       // Classical MOND
     'cdm':           [7]        // CDM + NFW
 };
@@ -2130,6 +4351,8 @@ var theoryDatasetMap = {
 function forceChipOn(seriesKey) {
     var chip = document.querySelector('.theory-chip[data-series="' + seriesKey + '"]');
     if (!chip) return;
+    // Unhide the chip if it was hidden via inline style
+    chip.style.display = '';
     var cb = chip.querySelector('input[type="checkbox"]');
     if (cb) cb.checked = true;
     chip.classList.add('active');
@@ -2172,13 +4395,6 @@ function initTheoryToggles() {
         chip.addEventListener('click', function(e) {
             e.preventDefault();
             var seriesKey = this.getAttribute('data-series');
-
-            // In inference mode, GFD and GFD-sigma are locked on (required
-            // for inference computation). Skip toggle for these chips.
-            if (currentMode === 'inference' &&
-                (seriesKey === 'gfd' || seriesKey === 'gfd_symmetric')) {
-                return;
-            }
 
             var cb = this.querySelector('input[type="checkbox"]');
             cb.checked = !cb.checked;
@@ -2259,7 +4475,7 @@ function initCrosshairReadout() {
             {key: 'observed',      idx: 3, color: '#FFC107', label: 'Observed'},
             {key: 'newtonian',     idx: 0, color: '#ff6b6b', label: 'Newtonian'},
             {key: 'gfd',           idx: 1, color: '#4da6ff', label: 'GFD'},
-            {key: 'gfd_symmetric', idx: 9, color: '#00E5FF', label: 'GFD\u03C3'},
+            {key: 'gfd_symmetric', idx: 9, color: '#00E5FF', label: 'GFD (Observed)'},
             {key: 'mond',          idx: 2, color: '#9966ff', label: 'MOND'},
             {key: 'cdm',           idx: 7, color: '#ffffff', label: 'CDM'}
         ];
@@ -2348,8 +4564,49 @@ function initCrosshairReadout() {
 // INITIALIZATION
 // =====================================================================
 
+var SPLASH_MIN_DISPLAY_MS = 3000;
+var LIBRARIES_MAX_WAIT_MS = 15000;
+
+function librariesReady() {
+    return typeof Chart !== 'undefined' && typeof Hammer !== 'undefined' && typeof katex !== 'undefined';
+}
+
+function waitForLibraries() {
+    if (librariesReady()) return Promise.resolve();
+    return new Promise(function(resolve, reject) {
+        var start = Date.now();
+        var t = setInterval(function() {
+            if (librariesReady()) {
+                clearInterval(t);
+                resolve();
+                return;
+            }
+            if (Date.now() - start >= LIBRARIES_MAX_WAIT_MS) {
+                clearInterval(t);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+function dismissSplash() {
+    var splash = document.getElementById('splash-overlay');
+    if (!splash) return;
+    var elapsed = performance.now();
+    var remaining = Math.max(0, SPLASH_MIN_DISPLAY_MS - elapsed);
+    setTimeout(function() {
+        splash.style.opacity = '0';
+        setTimeout(function() { splash.remove(); }, 500);
+    }, remaining);
+}
+
 async function init() {
+    await waitForLibraries();
+
     // Initialize UI components before data loads
+    initViewModeToggle();
+    initObsTabs();
+    initObsFontControls();
     initTheoryToggles();
     initCrosshairReadout();
 
@@ -2373,122 +4630,13 @@ async function init() {
         updateChart();
     }
 
-    // Dismiss splash overlay: wait at least 3s from page load so the
-    // splash feels intentional, then fade out.
-    var splash = document.getElementById('splash-overlay');
-    if (splash) {
-        var elapsed = performance.now();
-        var remaining = Math.max(0, 3000 - elapsed);
-        setTimeout(function() {
-            splash.style.opacity = '0';
-            setTimeout(function() { splash.remove(); }, 500);
-        }, remaining);
-    }
-}
-
-// =====================================================================
-// DATA PROVENANCE MODAL
-// =====================================================================
-
-function formatMass(m) {
-    if (m === 0) return '0';
-    const exp = Math.floor(Math.log10(m));
-    const coeff = m / Math.pow(10, exp);
-    return coeff.toFixed(2) + '\u00D710' + superscript(exp);
-}
-
-function openDataCard() {
-    var ex = currentExample || pinnedGalaxyExample;
-    if (!ex) return;
-
-    // Title
-    const label = ex.name.replace(/\s*\(.*\)/, '');
-    document.getElementById('dc-title').textContent = label + ' \u2014 Data Provenance';
-
-    // Summary
-    const mm = ex.mass_model;
-    const totalM = (mm.bulge ? mm.bulge.M : 0) + (mm.disk ? mm.disk.M : 0) + (mm.gas ? mm.gas.M : 0);
-    const gasFrac = mm.gas ? ((mm.gas.M / totalM) * 100).toFixed(0) : '0';
-    const nObs = ex.observations ? ex.observations.length : 0;
-    const rMin = nObs > 0 ? ex.observations[0].r : 0;
-    const rMax = nObs > 0 ? ex.observations[nObs - 1].r : 0;
-
-    document.getElementById('dc-summary').innerHTML =
-        'Total baryonic mass <strong>' + formatMass(totalM) + ' M<sub>sun</sub></strong>' +
-        ' &mdash; gas fraction ' + gasFrac + '%' +
-        ' &mdash; ' + nObs + ' observed data points spanning ' + rMin + '\u2013' + rMax + ' kpc.' +
-        ' All masses are independently measured; no parameters have been fitted to the rotation curve.';
-
-    // Mass model table
-    const tbody = document.getElementById('dc-mass-tbody');
-    tbody.innerHTML = '';
-    if (mm.bulge && mm.bulge.M > 0) {
-        tbody.innerHTML += '<tr><td>Stellar Bulge</td><td>' + formatMass(mm.bulge.M) +
-            '</td><td>a = ' + mm.bulge.a + '</td><td>Hernquist</td></tr>';
-    }
-    if (mm.disk && mm.disk.M > 0) {
-        tbody.innerHTML += '<tr><td>Stellar Disk</td><td>' + formatMass(mm.disk.M) +
-            '</td><td>R<sub>d</sub> = ' + mm.disk.Rd + '</td><td>Exponential</td></tr>';
-    }
-    if (mm.gas && mm.gas.M > 0) {
-        tbody.innerHTML += '<tr><td>Gas (HI+He)</td><td>' + formatMass(mm.gas.M) +
-            '</td><td>R<sub>d</sub> = ' + mm.gas.Rd + '</td><td>Exponential</td></tr>';
-    }
-    document.getElementById('dc-total-mass').innerHTML =
-        'Total: ' + formatMass(totalM) + ' M<sub>sun</sub>';
-
-    // Observations table
-    const obsTbody = document.getElementById('dc-obs-tbody');
-    obsTbody.innerHTML = '';
-    if (ex.observations) {
-        ex.observations.forEach(obs => {
-            obsTbody.innerHTML += '<tr><td>' + obs.r + '</td><td>' +
-                obs.v + '</td><td>\u00B1 ' + obs.err + '</td></tr>';
-        });
-    }
-
-    // References
-    const refList = document.getElementById('dc-references');
-    refList.innerHTML = '';
-    if (ex.references) {
-        ex.references.forEach(ref => {
-            refList.innerHTML += '<li>' + ref + '</li>';
-        });
-    }
-
-    // Methodology note
-    document.getElementById('dc-methodology').innerHTML =
-        '<strong>Methodology:</strong> Stellar masses derived from Spitzer 3.6 \u03BCm luminosity ' +
-        'with fixed M*/L = 0.5 M<sub>sun</sub>/L<sub>sun</sub> (stellar population synthesis, not fitted). ' +
-        'Gas masses from 21 cm HI observations with 1.33\u00D7 He correction ' +
-        '(Big Bang nucleosynthesis). Rotation curves from tilted-ring model fits to HI velocity fields. ' +
-        'No dark matter. No free parameters.';
-
-    // Flip: hide chart, show data
-    document.getElementById('chart-face').style.display = 'none';
-    document.getElementById('data-face').style.display = 'block';
-}
-
-function closeDataCard() {
-    // Flip back: show chart, hide data
-    document.getElementById('data-face').style.display = 'none';
-    document.getElementById('chart-face').style.display = 'block';
-}
-
-// Show/hide Data Sources button based on whether a galaxy is loaded
-function updateDataCardButton() {
-    const btn = document.getElementById('data-card-btn');
-    if (btn) {
-        // Show Data Sources when an example is loaded OR observations are pinned
-        var refExample = currentExample || pinnedGalaxyExample;
-        btn.style.display = (refExample && refExample.mass_model) ? 'block' : 'none';
-    }
+    dismissSplash();
 }
 
 // Expose functions to global scope for onclick handlers
-window.setMode = setMode;
 window.loadExample = loadExample;
-window.openDataCard = openDataCard;
-window.closeDataCard = closeDataCard;
+window.runAutoFit = runAutoFit;
+window.enterObservationMode = enterObservationMode;
+window.enterMassModelMode = enterMassModelMode;
 
 init();
