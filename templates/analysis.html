@@ -255,6 +255,7 @@
                         <button class="obs-tab active" data-tab="chart">Chart</button>
                         <button class="obs-tab" data-tab="data">Observation Data</button>
                         <button class="obs-tab" data-tab="chart-data">Chart Data</button>
+                        <button class="obs-tab" data-tab="vortex">Vortex</button>
                         <button class="obs-tab" data-tab="field-analysis" style="display: none;">Field Analysis</button>
                     </div>
 
@@ -329,6 +330,41 @@
                         </div>
                         <div class="obs-data-content" id="chart-data-content">
                             <!-- Populated dynamically by renderChartDataTab() -->
+                        </div>
+                    </div>
+
+                    <!-- Vortex tab: Figure 1a (velocity curves) + Figure 1b (transformation) -->
+                    <div id="vortex-face" class="obs-data-face" style="display: none;">
+                        <div id="vortex-message" class="vortex-message" style="display: none;"></div>
+                        <div class="vortex-theory-toggles theory-toggles" id="vortex-theory-toggles">
+                            <span class="theory-toggles-label">Plot</span>
+                            <label class="theory-chip" data-series="vortex_raw" style="--chip-color: #888888;" title="GFD velocity from raw observations">
+                                <input type="checkbox" checked> GFD (Velocity raw)
+                            </label>
+                            <label class="theory-chip" data-series="vortex_smooth" style="--chip-color: #aa44ff;" title="GFD velocity with 1.5% fractional variance">
+                                <input type="checkbox" checked> GFD (Velocity smooth)
+                            </label>
+                            <label class="theory-chip" data-series="vortex_observed" style="--chip-color: #FFC107;" title="Published rotation curve measurements">
+                                <input type="checkbox" checked> Observed Data
+                            </label>
+                            <label class="theory-chip" data-series="vortex_gfd" style="--chip-color: #00E5A0;" title="GFD velocity curve from mass model">
+                                <input type="checkbox"> GFD (Photometric)
+                            </label>
+                            <label class="theory-chip" data-series="vortex_mond" style="--chip-color: #9966ff;" title="Classical MOND">
+                                <input type="checkbox"> MOND
+                            </label>
+                            <label class="theory-chip" data-series="vortex_cdm" style="--chip-color: #ffffff;" title="Lambda CDM + NFW halo">
+                                <input type="checkbox"> CDM
+                            </label>
+                        </div>
+                        <div class="vortex-charts">
+                            <div class="vortex-chart-block">
+                                <div class="vortex-chart-wrap"><canvas id="vortexChartA"></canvas></div>
+                            </div>
+                            <div class="vortex-chart-block">
+                                <div class="vortex-chart-title">Figure 1b: Transformation T(r)</div>
+                                <div class="vortex-chart-wrap"><canvas id="vortexChartB"></canvas></div>
+                            </div>
                         </div>
                     </div>
 

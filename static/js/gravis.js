@@ -1171,6 +1171,11 @@ var CHART_Y_AXIS_LEFT_WIDTH = 80;
 
 // VPS panel: mirror of main chart + histogram drawn as line vertical segments (like observation error bars).
 var vpsChart = null;
+var vortexChartAInstance = null;
+var vortexChartBInstance = null;
+var vortexCurrentVariance = 1.5;
+var lastVortexRotationData = null;
+var lastVortexPhotometricData = null;
 
 function getVpsDeltaVData() {
     var src = (photometricResult && photometricResult.chart) || (sandboxResult && sandboxResult.chart);
@@ -1472,7 +1477,7 @@ function toggleMetricsSection(headerEl) {
 // API COMMUNICATION
 // =====================================================================
 
-function _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius) {
+function _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius, mode) {
     var body = {
         max_radius: maxRadius,
         num_points: 100,
@@ -1485,6 +1490,9 @@ function _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacti
     if (galacticRadius) {
         body.galactic_radius = galacticRadius;
     }
+    if (mode === 'vortex' || mode === 'default') {
+        body.mode = mode;
+    }
     // Origin Throughput: send explicit value when user has overridden.
     if (!isAutoThroughput && vortexStrengthSlider) {
         body.vortex_strength = parseFloat(vortexStrengthSlider.value);
@@ -1492,8 +1500,8 @@ function _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacti
     return body;
 }
 
-async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations, galacticRadius) {
-    var body = _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius);
+async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations, galacticRadius, mode) {
+    var body = _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius, mode);
     const resp = await fetch('/api/rotation/curve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1561,19 +1569,40 @@ function hideChartLoading() {
 
 let observationFetchPromise = null;
 
-async function fetchPhotometricData(galaxyId) {
+async function fetchPhotometricData(galaxyId, chartMode, maxRadius) {
     try {
+        var payload = {
+            galaxy_id: galaxyId,
+            num_points: 500,
+            mode: 'mass_model'
+        };
+        if (chartMode === 'vortex') {
+            payload.chart_mode = 'vortex';
+            if (maxRadius != null && maxRadius > 0) {
+                payload.max_radius = maxRadius;
+            }
+        }
+        if (chartMode === 'vortex_chart') {
+            if (maxRadius != null && maxRadius > 0) {
+                payload.max_radius = maxRadius;
+            }
+        }
         const resp = await fetch('/api/sandbox/photometric', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                galaxy_id: galaxyId,
-                num_points: 500,
-                mode: 'mass_model'
-            })
+            body: JSON.stringify(payload)
         });
-        if (!resp.ok) { sandboxResult = null; photometricResult = null; return; }
-        sandboxResult = await resp.json();
+        if (!resp.ok) {
+            if (chartMode === 'vortex' || chartMode === 'vortex_chart') return null;
+            sandboxResult = null;
+            photometricResult = null;
+            return;
+        }
+        var result = await resp.json();
+        if (chartMode === 'vortex' || chartMode === 'vortex_chart') {
+            return result;
+        }
+        sandboxResult = result;
         sandboxResult.gfd_source = 'photometric';
         photometricResult = sandboxResult;
         renderSandboxCurves();
@@ -1584,6 +1613,7 @@ async function fetchPhotometricData(galaxyId) {
         // Prefetch observation curves (sigma + accel) in background
         observationFetchPromise = fetchObservationData(galaxyId);
     } catch (e) {
+        if (chartMode === 'vortex' || chartMode === 'vortex_chart') return null;
         sandboxResult = null;
         photometricResult = null;
     }
@@ -3268,11 +3298,15 @@ function enterMassModelMode() {
         var theoryToggles = document.getElementById('theory-toggles');
         var chartContainer = document.querySelector('.chart-container');
         var obsFace = document.getElementById('obs-data-face');
+        var chartDataFace = document.getElementById('chart-data-face');
+        var vortexFace = document.getElementById('vortex-face');
         var fieldFace = document.getElementById('field-analysis-face');
         var rightPanel = document.querySelector('.right-panel');
         if (theoryToggles) theoryToggles.style.display = '';
         if (chartContainer) chartContainer.style.display = '';
         if (obsFace) obsFace.style.display = 'none';
+        if (chartDataFace) chartDataFace.style.display = 'none';
+        if (vortexFace) vortexFace.style.display = 'none';
         if (fieldFace) fieldFace.style.display = 'none';
         if (rightPanel) rightPanel.classList.remove('obs-data-active');
         var tabBar = document.getElementById('obs-tab-bar');
@@ -3343,6 +3377,7 @@ function initObsTabs() {
             var chartContainer   = document.querySelector('.chart-container');
             var obsFace          = document.getElementById('obs-data-face');
             var chartDataFace    = document.getElementById('chart-data-face');
+            var vortexFace       = document.getElementById('vortex-face');
             var fieldFace        = document.getElementById('field-analysis-face');
             var rightPanel      = document.querySelector('.right-panel');
 
@@ -3351,6 +3386,7 @@ function initObsTabs() {
             if (chartContainer) chartContainer.style.display = 'none';
             if (obsFace)        obsFace.style.display        = 'none';
             if (chartDataFace)  chartDataFace.style.display   = 'none';
+            if (vortexFace)      vortexFace.style.display      = 'none';
             if (fieldFace)      fieldFace.style.display      = 'none';
             if (rightPanel) rightPanel.classList.remove('obs-data-active');
 
@@ -3364,6 +3400,10 @@ function initObsTabs() {
                 if (chartDataFace) chartDataFace.style.display = '';
                 if (rightPanel) rightPanel.classList.add('obs-data-active');
                 renderChartDataTab();
+            } else if (target === 'vortex') {
+                if (vortexFace) vortexFace.style.display = '';
+                if (rightPanel) rightPanel.classList.add('obs-data-active');
+                loadVortexTab(vortexCurrentVariance);
             } else if (target === 'field-analysis') {
                 if (fieldFace) fieldFace.style.display = '';
                 if (rightPanel) rightPanel.classList.add('obs-data-active');
@@ -3371,6 +3411,271 @@ function initObsTabs() {
                 loadFieldAnalysis();
             }
         });
+    });
+}
+
+function isVortexChipEnabled(seriesKey) {
+    var face = document.getElementById('vortex-face');
+    if (!face) return true;
+    var chip = face.querySelector('.theory-chip[data-series="' + seriesKey + '"]');
+    if (!chip) return true;
+    var cb = chip.querySelector('input[type="checkbox"]');
+    return cb ? cb.checked : true;
+}
+
+var vortexChipToDatasetIndex = { vortex_raw: 0, vortex_smooth: 1, vortex_observed: 2, vortex_mond: 3, vortex_cdm: 4, vortex_gfd: 5 };
+
+function initVortexChipListeners() {
+    var container = document.getElementById('vortex-theory-toggles');
+    if (!container) return;
+    var bound = container.getAttribute('data-vortex-listeners');
+    if (bound === '1') return;
+    container.setAttribute('data-vortex-listeners', '1');
+    container.addEventListener('click', function(ev) {
+        var chip = ev.target.closest('.theory-chip[data-series^="vortex_"]');
+        if (!chip) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        var key = chip.getAttribute('data-series');
+        var cb = chip.querySelector('input[type="checkbox"]');
+        var dsIdx = vortexChipToDatasetIndex[key];
+        if (!cb || dsIdx === undefined) return;
+        cb.checked = !cb.checked;
+        chip.classList.toggle('active', cb.checked);
+        if (vortexChartAInstance && vortexChartAInstance.data && vortexChartAInstance.data.datasets[dsIdx]) {
+            vortexChartAInstance.data.datasets[dsIdx].hidden = !cb.checked;
+            vortexChartAInstance.update('none');
+        }
+    }, true);
+}
+
+function syncVortexChipActiveState() {
+    var face = document.getElementById('vortex-face');
+    if (!face) return;
+    var chips = face.querySelectorAll('.theory-chip[data-series^="vortex_"]');
+    for (var i = 0; i < chips.length; i++) {
+        var chip = chips[i];
+        var cb = chip.querySelector('input[type="checkbox"]');
+        if (cb) chip.classList.toggle('active', cb.checked);
+    }
+}
+
+/**
+ * Load Vortex tab data (figure-a, figure-b, and bridged theory curves).
+ * Fetches vortex-mode rotation and photometric so GFD (Photometric), MOND, CDM
+ * are symmetric (no spurious dip for r < 0).
+ */
+function loadVortexTab(variancePct) {
+    var example = pinnedGalaxyExample || currentExample;
+    var galaxyId = example && example.id ? example.id : null;
+    if (!galaxyId) {
+        lastVortexRotationData = null;
+        lastVortexPhotometricData = null;
+        renderVortexCharts(null, null);
+        return;
+    }
+    var body = JSON.stringify({ galaxy_id: galaxyId, variance_pct: variancePct });
+    var massModel = getMassModelFromSliders();
+    var predObs = pinnedObservations || (example && example.observations) || [];
+    var predMaxR = parseFloat(distanceSlider.value);
+    if (predObs.length > 0) {
+        var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
+        predMaxR = Math.max(predMaxR, maxObsR * 1.15);
+    }
+    var gr = (example && example.galactic_radius) ? parseFloat(example.galactic_radius) : parseFloat(distanceSlider.value);
+    var accelRatio = parseFloat(accelSlider.value);
+
+    Promise.all([
+        fetch('/api/vortex/figure-a', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body }).then(function(r) { return r.ok ? r.json() : null; }),
+        fetch('/api/vortex/figure-b', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body }).then(function(r) { return r.ok ? r.json() : null; }),
+        fetchRotationCurve(predMaxR, accelRatio, massModel, predObs, gr, 'default').then(function(d) { return d; }).catch(function() { return null; }),
+        fetchPhotometricData(galaxyId, 'vortex_chart', predMaxR).then(function(d) { return d; }).catch(function() { return null; })
+    ]).then(function(results) {
+        lastVortexRotationData = results[2] || null;
+        lastVortexPhotometricData = results[3] || null;
+        renderVortexCharts(results[0], results[1]);
+    }).catch(function() {
+        lastVortexRotationData = null;
+        lastVortexPhotometricData = null;
+        renderVortexCharts(null, null);
+    });
+}
+
+/**
+ * Render or clear Figure 1a and Figure 1b vortex charts.
+ * figA: { figure_a: { chart1, chart2 } }; figB: { figure_b: { chart1, chart2 } }.
+ */
+function renderVortexCharts(figA, figB) {
+    var canvasA = document.getElementById('vortexChartA');
+    var canvasB = document.getElementById('vortexChartB');
+    if (!canvasA || !canvasB) return;
+
+    if (vortexChartAInstance) {
+        vortexChartAInstance.destroy();
+        vortexChartAInstance = null;
+    }
+    if (vortexChartBInstance) {
+        vortexChartBInstance.destroy();
+        vortexChartBInstance = null;
+    }
+
+    if (!figA || !figA.figure_a || !figB || !figB.figure_b) {
+        if (vortexChartAInstance) { vortexChartAInstance.destroy(); vortexChartAInstance = null; }
+        if (vortexChartBInstance) { vortexChartBInstance.destroy(); vortexChartBInstance = null; }
+        var msg = document.getElementById('vortex-message');
+        if (msg) {
+            msg.style.display = '';
+            msg.textContent = 'Select an observation to load data.';
+        }
+        return;
+    }
+    var msg = document.getElementById('vortex-message');
+    if (msg) msg.style.display = 'none';
+
+    var c1 = figA.figure_a.chart1;
+    var c2 = figA.figure_a.chart2;
+    var radii = c1.radii || [];
+    var vRaw = c1.v_raw || [];
+    var vFv = c2.v_fv || [];
+    var obsR = c1.obs_r || [];
+    var obsV = c1.obs_v || [];
+    var obsErr = c1.obs_err || [];
+
+    var rawPoints = radii.map(function(r, i) { return { x: r, y: vRaw[i] }; });
+    var fvPoints = radii.map(function(r, i) {
+        var y = vFv[i];
+        return (y != null && typeof y === 'number') ? { x: r, y: y } : null;
+    }).filter(function(p) { return p !== null; });
+    var obsPoints = obsR.map(function(r, i) { return { x: r, y: obsV[i] }; });
+
+    function mirrorCurveForVortex(points) {
+        if (!points || points.length === 0) return [];
+        var out = [];
+        for (var i = 0; i < points.length; i++) {
+            var p = points[i];
+            if (p.x > 0) out.push({ x: -p.x, y: p.y });
+        }
+        for (var j = 0; j < points.length; j++) out.push({ x: points[j].x, y: points[j].y });
+        out.sort(function(a, b) { return a.x - b.x; });
+        return out;
+    }
+    function seriesToPoints(radii, vals) {
+        if (!radii || !vals || radii.length !== vals.length) return [];
+        return radii.map(function(r, i) { return { x: r, y: vals[i] }; });
+    }
+    var gfdData = [];
+    if (lastVortexPhotometricData && lastVortexPhotometricData.chart && lastVortexPhotometricData.chart.radii && lastVortexPhotometricData.chart.gfd_photometric) {
+        var pr = lastVortexPhotometricData.chart.radii;
+        var pv = lastVortexPhotometricData.chart.gfd_photometric;
+        if (pr.length === pv.length && pr.length > 0) gfdData = seriesToPoints(pr, pv);
+    }
+    if (gfdData.length === 0 && chart && chart.data && chart.data.datasets[1] && chart.data.datasets[1].data) {
+        gfdData = chart.data.datasets[1].data.slice();
+    }
+    var mondData = [];
+    var cdmData = [];
+    if (lastVortexRotationData && lastVortexRotationData.radii && lastVortexRotationData.radii.length > 0) {
+        var rr = lastVortexRotationData.radii;
+        if (lastVortexRotationData.mond) mondData = seriesToPoints(rr, lastVortexRotationData.mond);
+        if (lastVortexRotationData.cdm) cdmData = seriesToPoints(rr, lastVortexRotationData.cdm);
+    }
+    if (mondData.length === 0 && chart && chart.data && chart.data.datasets[2] && chart.data.datasets[2].data) {
+        mondData = mirrorCurveForVortex(chart.data.datasets[2].data);
+    }
+    if (cdmData.length === 0 && chart && chart.data && chart.data.datasets[7] && chart.data.datasets[7].data) {
+        cdmData = mirrorCurveForVortex(chart.data.datasets[7].data);
+    }
+
+    var vortexDs = [
+        { label: 'GFD (Velocity raw)', data: rawPoints, borderColor: '#888', borderDash: [4, 4], borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_raw') },
+        { label: 'GFD (Velocity smooth)', data: fvPoints, borderColor: '#aa44ff', borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_smooth') },
+        { label: 'Observed', data: obsPoints, borderColor: '#FFC107', backgroundColor: '#FFC107', pointRadius: 5, showLine: false, hidden: !isVortexChipEnabled('vortex_observed') },
+        { label: 'MOND', data: mondData, borderColor: '#9966ff', borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_mond') },
+        { label: 'CDM', data: cdmData, borderColor: '#ffffff', borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_cdm') },
+        { label: 'GFD (Photometric)', data: gfdData, borderColor: 'rgba(0, 229, 160, 0.9)', backgroundColor: 'transparent', borderDash: [8, 4], borderWidth: 2, tension: 0.3, showLine: true, pointRadius: 0, pointHoverRadius: 0, pointStyle: 'circle', pointBackgroundColor: 'rgba(0, 229, 160, 0)', pointBorderColor: 'rgba(0, 229, 160, 0)', pointBorderWidth: 0, hidden: !isVortexChipEnabled('vortex_gfd') }
+    ];
+
+    vortexChartAInstance = new Chart(canvasA.getContext('2d'), {
+        type: 'line',
+        data: {
+            datasets: vortexDs
+        },
+        plugins: [{
+            id: 'vortexLockScale',
+            afterUpdate: function(chart) {
+                if (chart._vortexScaleLocked) return;
+                var sx = chart.scales.x;
+                var sy = chart.scales.y;
+                if (!sx || !sy) return;
+                chart.options.scales.x.min = sx.min;
+                chart.options.scales.x.max = sx.max;
+                chart.options.scales.y.min = sy.min;
+                chart.options.scales.y.max = sy.max;
+                chart._vortexScaleLocked = true;
+            }
+        }],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: { display: false },
+                title: { display: true, text: 'GFD Velocity Field: Covariant Completion from Observed Kinematics', color: '#e0e0e0', font: { size: 16, weight: '500' } }
+            },
+            scales: {
+                x: { type: 'linear', title: { display: true, text: 'Galactocentric radius r (kpc)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } },
+                y: { type: 'linear', title: { display: true, text: 'v(r) [km/s]' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } }
+            }
+        }
+    });
+    initVortexChipListeners();
+    syncVortexChipActiveState();
+
+    var b1 = figB.figure_b.chart1;
+    var b2 = figB.figure_b.chart2;
+    var rKpc1 = b1.r_kpc || [];
+    var ratio1 = b1.ratio_T || [];
+    var rKpc2 = b2.r_kpc || [];
+    var ratio2 = b2.ratio_T || [];
+
+    var line1 = rKpc1.map(function(r, i) { return { x: r, y: ratio1[i] }; });
+    var line2 = rKpc2.map(function(r, i) { return { x: r, y: ratio2[i] }; });
+
+    vortexChartBInstance = new Chart(canvasB.getContext('2d'), {
+        type: 'line',
+        data: {
+            datasets: [
+                { label: 'T(r) raw obs velocity vs mass model', data: line1, borderColor: '#2e7d32', borderDash: [4, 4], borderWidth: 2, tension: 0.3, pointRadius: 0 },
+                { label: 'T(r) from Figure A chart 2 velocity (1.5% FV)', data: line2, borderColor: '#1565c0', borderWidth: 2, tension: 0.3, pointRadius: 0 }
+            ]
+        },
+        plugins: [{
+            id: 'vortexLockScaleB',
+            afterUpdate: function(chart) {
+                if (chart._vortexScaleLocked) return;
+                var sx = chart.scales.x;
+                var sy = chart.scales.y;
+                if (!sx || !sy) return;
+                chart.options.scales.x.min = sx.min;
+                chart.options.scales.x.max = sx.max;
+                chart.options.scales.y.min = sy.min;
+                chart.options.scales.y.max = sy.max;
+                chart._vortexScaleLocked = true;
+            }
+        }],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: { display: true, position: 'top' },
+                title: { display: true, text: 'Figure 1b: Transformation T(r) = M_derived / M_phot', color: '#e0e0e0', font: { size: 16, weight: '500' } }
+            },
+            scales: {
+                x: { type: 'linear', title: { display: true, text: 'Galactocentric radius r (kpc)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } },
+                y: { type: 'linear', title: { display: true, text: 'M_derived / M_phot' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' }, min: 0 }
+            }
+        }
     });
 }
 
@@ -4863,6 +5168,7 @@ async function init() {
     // Initialize UI components before data loads
     initViewModeToggle();
     initObsTabs();
+    initVortexChipListeners();
     initObsFontControls();
     initTheoryToggles();
     initCrosshairReadout();

@@ -24,7 +24,9 @@ ROTATION CURVE DATA: 1-sigma error bars from published measurements
 IMPORTANT: No unicode characters (Windows charmap constraint).
 """
 
+import json
 import math
+import os
 
 # Each galaxy entry contains:
 #   id: unique identifier
@@ -1298,9 +1300,63 @@ INFERENCE_GALAXIES = [
 ]
 
 
+def _sparc_dir():
+    """Path to sparc/ folder at repo root."""
+    return os.path.join(os.path.dirname(__file__), "..", "sparc")
+
+
+def _load_sparc_galaxy_by_id(galaxy_id):
+    """Load a single galaxy from sparc/<galaxy_id>.json if present. Returns dict or None."""
+    if not galaxy_id or "/" in galaxy_id or "\\" in galaxy_id:
+        return None
+    path = os.path.join(_sparc_dir(), galaxy_id + ".json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            g = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(g, dict):
+        return None
+    required = ("id", "name", "distance", "galactic_radius", "mass", "accel", "mass_model", "observations", "references")
+    if not all(g.get(k) is not None for k in required):
+        return None
+    return g
+
+
+def _load_sparc_galaxies():
+    """Load galaxy JSON files from sparc/ folder. Returns sorted list by id."""
+    sparc_dir = _sparc_dir()
+    if not os.path.isdir(sparc_dir):
+        return []
+    result = []
+    for fname in os.listdir(sparc_dir):
+        if not fname.endswith(".json"):
+            continue
+        path = os.path.join(sparc_dir, fname)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                g = json.load(f)
+            if not isinstance(g, dict):
+                continue
+            required = ("id", "name", "distance", "galactic_radius", "mass", "accel", "mass_model", "observations", "references")
+            if not all(g.get(k) is not None for k in required):
+                continue
+            result.append(g)
+        except (json.JSONDecodeError, OSError):
+            continue
+    result.sort(key=lambda x: (x.get("id") or ""))
+    return result
+
+
 def get_prediction_galaxies():
     """Return all prediction-mode galaxies (with mass models + observations)."""
-    return PREDICTION_GALAXIES + SIMPLE_PREDICTION_GALAXIES
+    base = PREDICTION_GALAXIES + SIMPLE_PREDICTION_GALAXIES
+    sparc = _load_sparc_galaxies()
+    return base + sparc
 
 
 def get_inference_galaxies():
@@ -1309,11 +1365,11 @@ def get_inference_galaxies():
 
 
 def get_galaxy_by_id(galaxy_id):
-    """Look up a galaxy by its unique id across all catalogs."""
-    for g in PREDICTION_GALAXIES + SIMPLE_PREDICTION_GALAXIES + INFERENCE_GALAXIES:
+    """Look up a galaxy by its unique id: built-in catalog first, then sparc/<id>.json."""
+    for g in get_prediction_galaxies() + INFERENCE_GALAXIES:
         if g["id"] == galaxy_id:
             return g
-    return None
+    return _load_sparc_galaxy_by_id(galaxy_id)
 
 
 def get_all_galaxies():

@@ -27,6 +27,10 @@ from physics.services.sandbox.bayesian_fit import (
     gfd_velocity_curve,
 )
 from physics.services.rotation.inference import optimize_inference, solve_field_geometry
+from physics.services.rotation.vortex_bridge import (
+    mirror_curve_with_cutoff,
+    truncate_to_first_obs,
+)
 from physics.constants import A0, KPC_TO_M
 from data.galaxies import get_all_galaxies, get_galaxy_by_id
 
@@ -207,11 +211,17 @@ class InferenceSandboxService(GravisService):
                     chart_radii,
                     Mb_p, ab_p, Md_p, Rd_p, Mg_p, Rg_p,
                     a0_eff)
+                chart_out = {
+                    "radii": [round(r, 4) for r in chart_radii],
+                    "gfd_photometric": [round(v, 4) for v in photo_vels],
+                }
+                if data.get("chart_mode") == "vortex":
+                    radii_sym, series_sym = mirror_curve_symmetric(
+                        chart_out["radii"], {"gfd_photometric": chart_out["gfd_photometric"]})
+                    chart_out["radii"] = radii_sym
+                    chart_out["gfd_photometric"] = series_sym["gfd_photometric"]
                 return jsonify({
-                    "chart": {
-                        "radii": [round(r, 4) for r in chart_radii],
-                        "gfd_photometric": [round(v, 4) for v in photo_vels],
-                    },
+                    "chart": chart_out,
                     "field_geometry": photo_geom,
                     "sparc_r_hi_kpc": 0,
                     "mode": "manual",
@@ -307,18 +317,19 @@ class InferenceSandboxService(GravisService):
                 })
 
             sparc_r_hi = gal.get("galactic_radius", 0)
+            r_first_obs = min(obs_r) if obs_r else 0.0
 
+            chart_out = {
+                "radii": [round(r, 4) for r in chart_radii],
+                "gfd_photometric": [round(v, 4) for v in photo_vels],
+            }
             resp = {
                 "galaxy": galaxy_name,
                 "photometric_mass_model": pm,
                 "photometric_M_total": photo_result["M_total"],
                 "field_geometry": photo_geom,
                 "sparc_r_hi_kpc": sparc_r_hi,
-                "chart": {
-                    "radii": [round(r, 4) for r in chart_radii],
-                    "gfd_photometric": [
-                        round(v, 4) for v in photo_vels],
-                },
+                "chart": chart_out,
                 "residuals": residuals,
                 "n_obs": len(obs_r),
                 "mode": mode,
@@ -362,6 +373,40 @@ class InferenceSandboxService(GravisService):
                     resp["accel_rms"] = accel_result["rms"]
                     resp["vortex_signal_accel"] = accel_result[
                         "vortex_signal"]
+
+            if data.get("chart_mode") == "vortex":
+                radii_full = resp["chart"]["radii"]
+                max_radius = data.get("max_radius")
+                if max_radius is not None and float(max_radius) > 0:
+                    max_radius = float(max_radius)
+                    mask = [i for i, r in enumerate(radii_full) if float(r) <= max_radius]
+                    if mask:
+                        radii_full = [radii_full[i] for i in mask]
+                        for k in list(resp["chart"].keys()):
+                            if k != "radii" and isinstance(resp["chart"][k], list):
+                                if len(resp["chart"][k]) == len(resp["chart"]["radii"]):
+                                    resp["chart"][k] = [resp["chart"][k][i] for i in mask]
+                        resp["chart"]["radii"] = radii_full
+                series_full = {k: v for k, v in resp["chart"].items()
+                               if k != "radii" and isinstance(v, list)
+                               and len(v) == len(radii_full)}
+                if series_full:
+                    radii_sym, series_sym = mirror_curve_with_cutoff(
+                        radii_full, series_full, r_first_obs, bridge_fv_percent=1.0)
+                    resp["chart"]["radii"] = radii_sym
+                    for k, vals in series_sym.items():
+                        resp["chart"][k] = vals
+            elif r_first_obs > 0:
+                radii = resp["chart"]["radii"]
+                series_dict = {k: v for k, v in resp["chart"].items()
+                               if k != "radii" and isinstance(v, list)
+                               and len(v) == len(radii)}
+                if series_dict:
+                    radii_tr, series_tr = truncate_to_first_obs(
+                        radii, series_dict, r_first_obs)
+                    resp["chart"]["radii"] = radii_tr
+                    for k, vals in series_tr.items():
+                        resp["chart"][k] = vals
 
             return jsonify(resp)
 

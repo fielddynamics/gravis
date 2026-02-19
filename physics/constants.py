@@ -51,6 +51,9 @@ HORIZON_THROAT_ACCEL_RATIO = 2.0 / FK  # 0.095238...
 # Throat fraction: R_t / R_env (emerges from the two yN thresholds)
 THROAT_FRAC = 0.30
 
+# Speed of light (CODATA 2018 exact)
+C_LIGHT = 2.99792458e8  # m/s
+
 
 def verify_a0():
     """Verify a0 is approximately 1.2e-10 m/s^2."""

@@ -35,6 +35,10 @@ from physics.nfw import (
     abundance_matching, fit_halo, concentration, r200_kpc,
 )
 from data.galaxies import get_all_galaxies, get_galaxy_by_id
+from physics.services.rotation.vortex_bridge import (
+    mirror_curve_with_cutoff,
+    truncate_to_first_obs,
+)
 
 
 class RotationService(GravisService):
@@ -62,6 +66,10 @@ class RotationService(GravisService):
         if not mass_model:
             raise ValueError("mass_model is required")
 
+        mode = (config.get("mode") or "default").strip().lower()
+        if mode not in ("default", "vortex"):
+            mode = "default"
+
         return {
             "max_radius": config.get("max_radius", 30),
             "num_points": max(10, min(int(config.get("num_points", 100)), 500)),
@@ -69,8 +77,8 @@ class RotationService(GravisService):
             "mass_model": mass_model,
             "observations": config.get("observations"),
             "galactic_radius": config.get("galactic_radius"),
-            # None means "use auto"; explicit value means user override
             "vortex_strength": config.get("vortex_strength"),
+            "mode": mode,
         }
 
     def _cdm_halo(self, mass_model, observations, accel_ratio):
@@ -157,6 +165,41 @@ class RotationService(GravisService):
         response["auto_origin_throughput"] = vortex_val
         response["theoretical_origin_throughput"] = theoretical_ot
         response["cdm_halo"] = cdm_halo_info
+
+        observations = config.get("observations")
+        r_first_obs = 0.0
+        if observations:
+            pos_r = [float(o.get("r", 0)) for o in observations if o.get("r") and float(o.get("r", 0)) > 0]
+            if pos_r:
+                r_first_obs = min(pos_r)
+
+        if config.get("mode") == "vortex":
+            radii = response["radii"]
+            series_dict = {
+                k: response[k] for k in ("newtonian", "dtg", "mond", "cdm")
+                if k in response
+            }
+            if "enclosed_mass" in response:
+                series_dict["enclosed_mass"] = response["enclosed_mass"]
+            radii_sym, series_sym = mirror_curve_with_cutoff(
+                radii, series_dict, r_first_obs, bridge_fv_percent=1.0)
+            response["radii"] = radii_sym
+            for k, vals in series_sym.items():
+                response[k] = vals
+        else:
+            if r_first_obs > 0:
+                radii = response["radii"]
+                series_dict = {
+                    k: response[k] for k in ("newtonian", "dtg", "mond", "cdm")
+                    if k in response
+                }
+                if "enclosed_mass" in response:
+                    series_dict["enclosed_mass"] = response["enclosed_mass"]
+                radii_tr, series_tr = truncate_to_first_obs(
+                    radii, series_dict, r_first_obs)
+                response["radii"] = radii_tr
+                for k, vals in series_tr.items():
+                    response[k] = vals
 
         # Field geometry: always compute from mass model via topological
         # yN conditions. No observations or galactic_radius needed.
@@ -256,6 +299,40 @@ class RotationService(GravisService):
                 run_mass_model, accel_ratio)
 
         response["cdm_halo"] = cdm_halo_info
+
+        r_first_obs = 0.0
+        if observations:
+            pos_r = [float(o.get("r", 0)) for o in observations if o.get("r") and float(o.get("r", 0)) > 0]
+            if pos_r:
+                r_first_obs = min(pos_r)
+
+        if config.get("mode") == "vortex":
+            radii = response["radii"]
+            series_dict = {
+                k: response[k] for k in ("newtonian", "dtg", "mond", "cdm")
+                if k in response
+            }
+            if "enclosed_mass" in response:
+                series_dict["enclosed_mass"] = response["enclosed_mass"]
+            radii_sym, series_sym = mirror_curve_with_cutoff(
+                radii, series_dict, r_first_obs, bridge_fv_percent=1.0)
+            response["radii"] = radii_sym
+            for k, vals in series_sym.items():
+                response[k] = vals
+        else:
+            if r_first_obs > 0:
+                radii = response["radii"]
+                series_dict = {
+                    k: response[k] for k in ("newtonian", "dtg", "mond", "cdm")
+                    if k in response
+                }
+                if "enclosed_mass" in response:
+                    series_dict["enclosed_mass"] = response["enclosed_mass"]
+                radii_tr, series_tr = truncate_to_first_obs(
+                    radii, series_dict, r_first_obs)
+                response["radii"] = radii_tr
+                for k, vals in series_tr.items():
+                    response[k] = vals
 
         # Fit quality metrics (computed against optimized mass model)
         response["metrics"] = compute_fit_metrics(

@@ -25,12 +25,14 @@ from physics.services.a0_derivation import A0DerivationService
 from physics.services.nuclear_decay import NuclearDecayService
 from physics.services.architecture import ArchitectureService
 from physics.services.sandbox import InferenceSandboxService
+from physics.services.vortex import VortexService
 
 
 def create_registry():
     """Build and populate the service registry."""
     registry = GravisRegistry()
     registry.register(RotationService())
+    registry.register(VortexService())
     registry.register(RARService())
     registry.register(RedshiftService())
     registry.register(SolarService())
