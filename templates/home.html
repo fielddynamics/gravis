@@ -77,7 +77,7 @@
         {% for cat in category_order %}
             {% set cat_services = [] %}
             {% for s in services %}
-                {% if s.category == cat and s.id != "sandbox" %}
+                {% if s.category == cat and s.id != "sandbox" and s.id != "vortex" and s.id != "sparc" %}
                     {% if cat_services.append(s) %}{% endif %}
                 {% endif %}
             {% endfor %}
