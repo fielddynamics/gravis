@@ -255,12 +255,8 @@ function updateMassModelDisplaysOnly() {
                 fetchGfdFromMassModel(mm, maxR, parseFloat(accelSlider.value));
             }, MANUAL_GFD_DEBOUNCE_MS);
         }
-        // Reset to Mass Model mode when user manually adjusts sliders
         if (isAutoFitted) {
-            isAutoFitted = false;
-            document.getElementById('observation-mass-panel').style.display = 'none';
-            document.getElementById('mass-model-panel').style.display = '';
-            resetViewModeToggle();
+            navigateTo('charts', 'chart');
             hideAutoMapDiagnostics();
         }
         updateMassModelDisplays();
@@ -1689,6 +1685,10 @@ async function fetchObservationData(galaxyId) {
             renderSandboxCurves();
         } else {
             updateObservationCurvesOnly();
+            if (pinnedObservations && pinnedObservations.length > 0 && result.chart && result.chart.gfd_accel) {
+                sandboxResult = result;
+                navigateTo('charts', 'obs-chart');
+            }
         }
         updateDiagnosticsPanel();
     } catch (e) {
@@ -3023,7 +3023,7 @@ function loadExample() {
         pinnedGalaxyLabel = null;
         pinnedGalaxyExample = null;
         sandboxResult = null;
-        hideObsTabs();
+        navigateTo('charts', 'chart');
         chart.options.plugins.title.text = 'Rotation Curve: Gravitational Theory Comparison';
         chart.options.plugins.zoom.limits.x.min = 0;
         chart.options.plugins.zoom.limits.x.max = 100;
@@ -3075,15 +3075,7 @@ function loadExample() {
     anchorRadiusInput.value = example.distance;
     massSlider.value = example.mass || 11;
 
-    // Show/hide view-mode toggle based on whether galaxy has observations
-    var viewToggle = document.getElementById('view-mode-toggle');
-    if (viewToggle) {
-        viewToggle.style.display = (example.observations && example.observations.length > 0)
-            ? '' : 'none';
-    }
-
-    // Switch to Mass Model view (hide VPS histogram panel, show mass panel)
-    enterMassModelMode();
+    navigateTo('charts', 'chart');
 
     // Set zoom limits based on observational data or distance
     var obsData = example.observations;
@@ -3153,7 +3145,6 @@ function loadExample() {
             isLoadingExample = false;
             massModelManuallyModified = false;
             updateResetToPhotometricButton();
-            if (pinnedObservations && pinnedObservations.length > 0) showObsTabs(); else hideObsTabs();
             fetchObservationData(example.id);
             fetchRotationCurve(predMaxR, parseFloat(accelSlider.value), massModel, predObs, gr).then(function(data) {
                 var i;
@@ -3184,147 +3175,212 @@ function loadExample() {
 }
 
 // =====================================================================
-// VIEW MODE TOGGLE: Mass Model vs Observations
+// ANALYSIS VIEW STATE AND NAVIGATION PIPELINE
 // =====================================================================
-// The segmented toggle lets users switch between two perspectives:
-//   "Mass Model"   -- GFD predicts from the user's photometric mass estimates.
-//                     Sliders are interactive. This is the default exploration mode.
-//   "Observations"  -- GFD derives the mass model directly from kinematic data.
-//                     Sliders show derived values. Pure first-principles result.
+// Single source of truth for what is shown in left panel, right panel (tabs + content).
+// All tab clicks and programmatic view changes go through navigateTo().
+//
+// Contract: for any (rightPanelTab, chartsSubmenuTab),
+//   - Left panel:  mass-model-panel only for Charts+Mass model; else observation-mass-panel (read-only).
+//   - Right panel: one of [Charts tab content | Chart Data tab content].
+//   - If Charts: submenu visible when galaxy loaded; one of [chart container | vortex face | field-analysis face].
+//   - Chart state (GFD chips, VPS, datasets) is applied by applyMassModelChartState or applyObservationChartState.
+// Adding a new right-panel tab or Charts submenu: extend navigateTo() and analysisViewState.
 // =====================================================================
 
+/** Current analysis view: right-panel tab and Charts submenu tab. */
+var analysisViewState = {
+    rightPanelTab: 'charts',
+    chartsSubmenuTab: 'chart'
+};
+
 /**
- * Initialise the view-mode toggle. Attaches click handlers to both
- * segments and wires them to enterMassModelMode / enterObservationMode.
+ * Navigate to a view. Single pipeline for tab switches; determines left panel,
+ * right panel tab content, and chart/submenu state. Call this from tab clicks
+ * and when loading or clearing a galaxy.
+ * @param {string} rightPanelTab - 'charts' | 'chart-data'
+ * @param {string} [chartsSubmenuTab] - 'chart' | 'obs-chart' | 'vortex' | 'field-analysis' (only when rightPanelTab === 'charts')
  */
-function initViewModeToggle() {
-    var toggle = document.getElementById('view-mode-toggle');
-    if (!toggle) return;
-    var btns = toggle.querySelectorAll('.view-mode-btn');
-    btns.forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            var mode = this.getAttribute('data-mode');
-            if (mode === 'observations' && !isAutoFitted) {
-                enterObservationMode();
-            } else if (mode === 'mass-model' && isAutoFitted) {
-                enterMassModelMode();
-            }
+function navigateTo(rightPanelTab, chartsSubmenuTab) {
+    if (!rightPanelTab) return;
+    if (rightPanelTab === 'charts' && chartsSubmenuTab) {
+        analysisViewState.rightPanelTab = 'charts';
+        analysisViewState.chartsSubmenuTab = chartsSubmenuTab;
+    } else if (rightPanelTab === 'chart-data') {
+        analysisViewState.rightPanelTab = 'chart-data';
+        analysisViewState.chartsSubmenuTab = 'chart';
+    } else {
+        analysisViewState.rightPanelTab = rightPanelTab;
+        analysisViewState.chartsSubmenuTab = chartsSubmenuTab || 'chart';
+    }
+
+    var rpTab = analysisViewState.rightPanelTab;
+    var csTab = analysisViewState.chartsSubmenuTab;
+
+    var massModelPanel = document.getElementById('mass-model-panel');
+    var obsMassPanel = document.getElementById('observation-mass-panel');
+    var rightPanel = document.querySelector('.right-panel');
+    var tabBar = document.getElementById('obs-tab-bar');
+    var rightPanelTabs = document.getElementById('right-panel-tabs');
+    var contents = document.querySelectorAll('.right-panel-tab-content');
+    var theoryToggles = document.getElementById('theory-toggles');
+    var chartContainer = document.querySelector('.chart-container');
+    var obsFace = document.getElementById('obs-data-face');
+    var vortexFace = document.getElementById('vortex-face');
+    var fieldFace = document.getElementById('field-analysis-face');
+
+    // ----- Left panel -----
+    if (massModelPanel && obsMassPanel) {
+        if (rpTab === 'charts' && csTab === 'chart') {
+            massModelPanel.style.display = '';
+            obsMassPanel.style.display = 'none';
+        } else {
+            obsMassPanel.style.display = '';
+            massModelPanel.style.display = 'none';
+            if (rpTab === 'charts') populateObservationMassPanel();
+        }
+    }
+
+    // ----- Right panel: which tab content is visible -----
+    if (rightPanelTabs) {
+        var tabs = rightPanelTabs.querySelectorAll('.right-panel-tab');
+        tabs.forEach(function(t) {
+            t.classList.toggle('active', t.getAttribute('data-panel-tab') === rpTab);
         });
+    }
+    contents.forEach(function(el) {
+        var contentId = el.getAttribute('data-tab-content');
+        el.style.display = contentId === rpTab ? '' : 'none';
     });
+
+    // ----- Right panel: Charts submenu and main content -----
+    var hasGalaxy = !!(currentExample || pinnedGalaxyExample || (pinnedObservations && pinnedObservations.length > 0));
+    if (tabBar) {
+        tabBar.style.display = rpTab === 'charts' && hasGalaxy ? '' : 'none';
+        if (rpTab === 'charts') {
+            var subTabs = tabBar.querySelectorAll('.obs-tab');
+            subTabs.forEach(function(t) {
+                t.classList.toggle('active', t.getAttribute('data-tab') === csTab);
+            });
+        }
+    }
+
+    if (theoryToggles) theoryToggles.style.display = 'none';
+    if (chartContainer) chartContainer.style.display = 'none';
+    if (obsFace) obsFace.style.display = 'none';
+    if (vortexFace) vortexFace.style.display = 'none';
+    if (fieldFace) fieldFace.style.display = 'none';
+    if (rightPanel) rightPanel.classList.remove('obs-data-active');
+
+    if (rpTab === 'chart-data') {
+        if (rightPanel) rightPanel.classList.add('obs-data-active');
+        var chartDataFace = document.getElementById('chart-data-face');
+        if (chartDataFace) chartDataFace.style.display = '';
+        renderChartDataTab();
+        return;
+    }
+
+    // rpTab === 'charts': show the active Charts submenu content
+    if (csTab === 'chart') {
+        if (theoryToggles) theoryToggles.style.display = '';
+        if (chartContainer) chartContainer.style.display = '';
+        applyMassModelChartState();
+    } else if (csTab === 'obs-chart') {
+        if (theoryToggles) theoryToggles.style.display = '';
+        if (chartContainer) chartContainer.style.display = '';
+        applyObservationChartState();
+    } else if (csTab === 'vortex') {
+        if (vortexFace) vortexFace.style.display = '';
+        if (rightPanel) rightPanel.classList.add('obs-data-active');
+        loadVortexTab(vortexCurrentVariance);
+    } else if (csTab === 'field-analysis') {
+        if (fieldFace) fieldFace.style.display = '';
+        if (rightPanel) rightPanel.classList.add('obs-data-active');
+        loadFieldAnalysis();
+    }
 }
 
 /**
- * Switch to Observation mode: show GFD Sigma and GFD Accel curves.
- * Data is already loading/loaded from the background fetch kicked off
- * on galaxy selection. Just toggles visibility.
+ * Chart-only state for Mass Model view (GFD Photometric, no VPS). No panel visibility.
  */
-async function enterObservationMode() {
-    var toggle = document.getElementById('view-mode-toggle');
-    var obsBtn = toggle ? toggle.querySelector('[data-mode="observations"]') : null;
-    var mmBtn  = toggle ? toggle.querySelector('[data-mode="mass-model"]') : null;
-
-    isAutoFitted = true;
-
-    if (mmBtn)  mmBtn.classList.remove('active');
-    if (obsBtn) obsBtn.classList.add('active');
-
-    document.getElementById('mass-model-panel').style.display = 'none';
-    var obsPanel = document.getElementById('observation-mass-panel');
-    if (obsPanel) {
-        obsPanel.style.display = '';
-        populateObservationMassPanel();
+function applyMassModelChartState() {
+    isAutoFitted = false;
+    var vpsPanel = document.getElementById('vps-panel');
+    if (vpsPanel) vpsPanel.style.display = 'none';
+    updateResetToPhotometricButton();
+    var accelChip = document.querySelector('.theory-chip[data-series="gfd_accel"]');
+    if (accelChip) accelChip.style.display = 'none';
+    if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
+        chart.data.datasets[8].hidden = true;
+        chart.data.datasets[10].hidden = true;
+        chart.data.datasets[11].hidden = true;
     }
-
-    showObsTabs();
     blankRightPaneMetrics();
+    renderSandboxCurves();
+}
 
-    // Show GFD (Observed) chip only (GFD Sigma chip removed from badges)
+/**
+ * Chart-only state for Observations view (GFD Observed, VPS). No panel visibility.
+ */
+async function applyObservationChartState() {
+    isAutoFitted = true;
     var accelChip = document.querySelector('.theory-chip[data-series="gfd_accel"]');
     if (accelChip) accelChip.style.display = '';
-
-    // Wait for observation data if still loading from prefetch
     var hasObsData = sandboxResult && sandboxResult.chart &&
         sandboxResult.chart.gfd_spline &&
         sandboxResult.chart.gfd_spline.length > 0;
-
     if (!hasObsData && observationFetchPromise) {
         showChartLoading();
         await observationFetchPromise;
         hideChartLoading();
     }
-
-    chart.data.datasets[10].hidden = true;   // Spline line off; only purple GFD (Observed) (dataset 11)
-    chart.data.datasets[11].hidden = false;
-
+    if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
+        chart.data.datasets[10].hidden = true;
+        chart.data.datasets[11].hidden = false;
+    }
     var vpsPanel = document.getElementById('vps-panel');
     if (vpsPanel) vpsPanel.style.display = '';
     ensureVpsChart();
+    blankRightPaneMetrics();
     renderSandboxCurves();
     updateVpsChart();
 }
 
+// =====================================================================
+// VIEW MODE TOGGLE (legacy)
+// =====================================================================
+
+function initViewModeToggle() {
+    // No-op: view-mode toggle removed; navigation goes through navigateTo().
+}
+
 /**
- * Switch back to Mass Model mode: show only Observed Data + GFD Photometric.
+ * Top-level right-panel tabs (Charts | Chart Data). All view changes go through navigateTo().
+ */
+function initRightPanelTabs() {
+    var tabContainer = document.getElementById('right-panel-tabs');
+    if (!tabContainer) return;
+    var tabs = tabContainer.querySelectorAll('.right-panel-tab');
+    tabs.forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            var panelTab = this.getAttribute('data-panel-tab');
+            navigateTo(panelTab, analysisViewState.chartsSubmenuTab);
+        });
+    });
+}
+
+/**
+ * Switch to Observation view. Delegates to central pipeline (panels + chart state).
+ */
+function enterObservationMode() {
+    navigateTo('charts', 'obs-chart');
+}
+
+/**
+ * Switch to Mass Model view. Delegates to central pipeline (panels + chart state).
  */
 function enterMassModelMode() {
-    isAutoFitted = false;
-
-    var toggle = document.getElementById('view-mode-toggle');
-    if (toggle) {
-        var mmBtn  = toggle.querySelector('[data-mode="mass-model"]');
-        var obsBtn = toggle.querySelector('[data-mode="observations"]');
-        if (mmBtn)  mmBtn.classList.add('active');
-        if (obsBtn) obsBtn.classList.remove('active');
-    }
-
-    document.getElementById('observation-mass-panel').style.display = 'none';
-    document.getElementById('mass-model-panel').style.display = '';
-    var vpsPanel = document.getElementById('vps-panel');
-    if (vpsPanel) vpsPanel.style.display = 'none';
-    updateResetToPhotometricButton();
-
-    // Hide GFD (Observed) chip and observation-derived curves (datasets 10, 11)
-    var accelChip = document.querySelector('.theory-chip[data-series="gfd_accel"]');
-    if (accelChip) accelChip.style.display = 'none';
-    chart.data.datasets[10].hidden = true;
-    chart.data.datasets[11].hidden = true;
-
-    // Old Bayesian sigma stays hidden
-    chart.data.datasets[8].hidden = true;
-
-    // Keep Chart and Observation Data tabs visible in Mass Model mode; show chart view
-    if (pinnedObservations && pinnedObservations.length > 0) {
-        showObsTabs();
-        var theoryToggles = document.getElementById('theory-toggles');
-        var chartContainer = document.querySelector('.chart-container');
-        var obsFace = document.getElementById('obs-data-face');
-        var chartDataFace = document.getElementById('chart-data-face');
-        var vortexFace = document.getElementById('vortex-face');
-        var fieldFace = document.getElementById('field-analysis-face');
-        var rightPanel = document.querySelector('.right-panel');
-        if (theoryToggles) theoryToggles.style.display = '';
-        if (chartContainer) chartContainer.style.display = '';
-        if (obsFace) obsFace.style.display = 'none';
-        if (chartDataFace) chartDataFace.style.display = 'none';
-        if (vortexFace) vortexFace.style.display = 'none';
-        if (fieldFace) fieldFace.style.display = 'none';
-        if (rightPanel) rightPanel.classList.remove('obs-data-active');
-        var tabBar = document.getElementById('obs-tab-bar');
-        if (tabBar) {
-            var tabs = tabBar.querySelectorAll('.obs-tab');
-            tabs.forEach(function(t) {
-                t.classList.toggle('active', t.getAttribute('data-tab') === 'chart');
-            });
-        }
-    } else {
-        hideObsTabs();
-    }
-
-    // Blank right pane metrics
-    blankRightPaneMetrics();
-
-    // Re-render to apply Mass Model mode display (R_env only, no R_t/band)
-    renderSandboxCurves();
+    navigateTo('charts', 'chart');
 }
 
 /**
@@ -3344,14 +3400,7 @@ function runAutoFit() {
  * loading a new galaxy or when sliders are manually adjusted.
  */
 function resetViewModeToggle() {
-    var toggle = document.getElementById('view-mode-toggle');
-    if (!toggle) return;
-    var mmBtn  = toggle.querySelector('[data-mode="mass-model"]');
-    var obsBtn = toggle.querySelector('[data-mode="observations"]');
-    if (mmBtn)  mmBtn.classList.add('active');
-    if (obsBtn) obsBtn.classList.remove('active', 'loading');
-    // Ensure observation data tabs are hidden when resetting
-    hideObsTabs();
+    navigateTo('charts', 'chart');
 }
 
 // =====================================================================
@@ -3359,8 +3408,7 @@ function resetViewModeToggle() {
 // =====================================================================
 
 /**
- * Initialise click handlers for the observation mode tab bar.
- * Switches between the chart view and the observation data table.
+ * Charts submenu (Mass model | Observations | Vortex). All view changes go through navigateTo().
  */
 function initObsTabs() {
     var tabBar = document.getElementById('obs-tab-bar');
@@ -3369,47 +3417,7 @@ function initObsTabs() {
     tabs.forEach(function(tab) {
         tab.addEventListener('click', function() {
             var target = this.getAttribute('data-tab');
-            // Update active tab styling
-            tabs.forEach(function(t) { t.classList.remove('active'); });
-            this.classList.add('active');
-            // Elements controlled by tab switching
-            var theoryToggles    = document.getElementById('theory-toggles');
-            var chartContainer   = document.querySelector('.chart-container');
-            var obsFace          = document.getElementById('obs-data-face');
-            var chartDataFace    = document.getElementById('chart-data-face');
-            var vortexFace       = document.getElementById('vortex-face');
-            var fieldFace        = document.getElementById('field-analysis-face');
-            var rightPanel      = document.querySelector('.right-panel');
-
-            // Default: hide all content panels
-            if (theoryToggles)  theoryToggles.style.display  = 'none';
-            if (chartContainer) chartContainer.style.display = 'none';
-            if (obsFace)        obsFace.style.display        = 'none';
-            if (chartDataFace)  chartDataFace.style.display   = 'none';
-            if (vortexFace)      vortexFace.style.display      = 'none';
-            if (fieldFace)      fieldFace.style.display      = 'none';
-            if (rightPanel) rightPanel.classList.remove('obs-data-active');
-
-            if (target === 'chart') {
-                if (theoryToggles)  theoryToggles.style.display  = '';
-                if (chartContainer) chartContainer.style.display = '';
-            } else if (target === 'data') {
-                if (obsFace) obsFace.style.display = '';
-                if (rightPanel) rightPanel.classList.add('obs-data-active');
-            } else if (target === 'chart-data') {
-                if (chartDataFace) chartDataFace.style.display = '';
-                if (rightPanel) rightPanel.classList.add('obs-data-active');
-                renderChartDataTab();
-            } else if (target === 'vortex') {
-                if (vortexFace) vortexFace.style.display = '';
-                if (rightPanel) rightPanel.classList.add('obs-data-active');
-                loadVortexTab(vortexCurrentVariance);
-            } else if (target === 'field-analysis') {
-                if (fieldFace) fieldFace.style.display = '';
-                if (rightPanel) rightPanel.classList.add('obs-data-active');
-                // Lazy-load field analysis content on first view
-                loadFieldAnalysis();
-            }
+            navigateTo('charts', target);
         });
     });
 }
@@ -3620,7 +3628,7 @@ function renderVortexCharts(figA, figB) {
             animation: false,
             plugins: {
                 legend: { display: false },
-                title: { display: true, text: 'GFD Velocity Field: Covariant Completion from Observed Kinematics', color: '#e0e0e0', font: { size: 16, weight: '500' } }
+                title: { display: true, text: 'GFD Velocity Field: Covariant Action Applied to Observed Kinematics', color: '#e0e0e0', font: { size: 16, weight: '500' } }
             },
             scales: {
                 x: { type: 'linear', title: { display: true, text: 'Galactocentric radius r (kpc)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } },
@@ -3645,8 +3653,8 @@ function renderVortexCharts(figA, figB) {
         type: 'line',
         data: {
             datasets: [
-                { label: 'T(r) raw obs velocity vs mass model', data: line1, borderColor: '#2e7d32', borderDash: [4, 4], borderWidth: 2, tension: 0.3, pointRadius: 0 },
-                { label: 'T(r) from Figure A chart 2 velocity (1.5% FV)', data: line2, borderColor: '#1565c0', borderWidth: 2, tension: 0.3, pointRadius: 0 }
+                { label: 'Observed rotation curve vs GFD (Photometric mass model)', data: line1, borderColor: '#2e7d32', borderDash: [4, 4], borderWidth: 2, tension: 0.3, pointRadius: 0 },
+                { label: 'GFD Velocity Field (smoothed) vs GFD (Photometric mass model)', data: line2, borderColor: '#1565c0', borderWidth: 2, tension: 0.3, pointRadius: 0 }
             ]
         },
         plugins: [{
@@ -3669,11 +3677,11 @@ function renderVortexCharts(figA, figB) {
             animation: false,
             plugins: {
                 legend: { display: true, position: 'top' },
-                title: { display: true, text: 'Figure 1b: Transformation T(r) = M_derived / M_phot', color: '#e0e0e0', font: { size: 16, weight: '500' } }
+                title: { display: true, text: 'GFD Velocity Field vs GFD (Photometric mass model)', color: '#e0e0e0', font: { size: 16, weight: '500' } }
             },
             scales: {
-                x: { type: 'linear', title: { display: true, text: 'Galactocentric radius r (kpc)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } },
-                y: { type: 'linear', title: { display: true, text: 'M_derived / M_phot' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' }, min: 0 }
+                x: { type: 'linear', title: { display: true, text: 'Galactocentric radius (kpc)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } },
+                y: { type: 'linear', title: { display: true, text: 'Mass ratio T(r) (derived / photometric)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' }, min: 0 }
             }
         }
     });
@@ -3771,37 +3779,11 @@ function showObsTabs() {
 }
 
 /**
- * Hide the observation tab bar and ensure the chart face is visible.
- * Called when returning to Mass Model mode or loading a new galaxy.
+ * Hide Charts submenu and show chart view. Delegates to pipeline (e.g. when no galaxy).
  */
 function hideObsTabs() {
-    var tabBar = document.getElementById('obs-tab-bar');
-    if (tabBar) tabBar.style.display = 'none';
-
-    // Restore chart view: theory badges, chart container visible, all data panels hidden
-    var theoryToggles  = document.getElementById('theory-toggles');
-    var chartContainer = document.querySelector('.chart-container');
-    var obsFace        = document.getElementById('obs-data-face');
-    var chartDataFace  = document.getElementById('chart-data-face');
-    var fieldFace      = document.getElementById('field-analysis-face');
-    var rightPanel     = document.querySelector('.right-panel');
-    if (theoryToggles)  theoryToggles.style.display  = '';
-    if (chartContainer) chartContainer.style.display = '';
-    if (obsFace)        obsFace.style.display        = 'none';
-    if (chartDataFace)  chartDataFace.style.display  = 'none';
-    if (fieldFace)      fieldFace.style.display      = 'none';
-    if (rightPanel)     rightPanel.classList.remove('obs-data-active');
-
-    // Clear cached field analysis so it re-fetches on next open
+    navigateTo('charts', 'chart');
     _fieldAnalysisLoaded = false;
-
-    // Reset active tab to "Chart"
-    if (tabBar) {
-        var tabs = tabBar.querySelectorAll('.obs-tab');
-        tabs.forEach(function(t) {
-            t.classList.toggle('active', t.getAttribute('data-tab') === 'chart');
-        });
-    }
 }
 
 // =====================================================================
@@ -5167,6 +5149,7 @@ async function init() {
 
     // Initialize UI components before data loads
     initViewModeToggle();
+    initRightPanelTabs();
     initObsTabs();
     initVortexChipListeners();
     initObsFontControls();

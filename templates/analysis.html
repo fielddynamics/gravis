@@ -53,12 +53,6 @@
                         </div>
                     </div>
 
-                    <!-- View Mode Toggle: Mass Model (user estimates) vs Observations (GFD-derived) -->
-                    <div class="view-mode-toggle" id="view-mode-toggle" style="display: none;">
-                        <button class="view-mode-btn active" data-mode="mass-model">Mass Model</button>
-                        <button class="view-mode-btn" data-mode="observations">Observations</button>
-                    </div>
-
                     <!-- Mass Model mode: editable Mass Distribution panel -->
                     <div id="mass-model-panel" class="mass-model-section">
                         <div class="mass-model-header" style="cursor: default; display: flex; align-items: center; justify-content: space-between;">
@@ -250,13 +244,19 @@
                 <div class="resize-handle" id="resize-handle"></div>
 
                 <div class="right-panel">
-                    <!-- Observation mode tabs: top of container like Cursor/VS Code tabs -->
-                    <div class="obs-tab-bar" id="obs-tab-bar" style="display: none;">
-                        <button class="obs-tab active" data-tab="chart">Chart</button>
-                        <button class="obs-tab" data-tab="data">Observation Data</button>
-                        <button class="obs-tab" data-tab="chart-data">Chart Data</button>
-                        <button class="obs-tab" data-tab="vortex">Vortex</button>
-                        <button class="obs-tab" data-tab="field-analysis" style="display: none;">Field Analysis</button>
+                    <!-- Top-level tabs: Charts | Chart Data -->
+                    <div class="right-panel-tabs" id="right-panel-tabs">
+                        <button class="right-panel-tab active" data-panel-tab="charts">Charts</button>
+                        <button class="right-panel-tab" data-panel-tab="chart-data">Chart Data</button>
+                    </div>
+                    <!-- Charts tab content: submenu + chart/faces -->
+                    <div class="right-panel-tab-content" id="right-panel-tab-content-charts" data-tab-content="charts">
+                    <!-- Submenu under Charts: Mass model | Observations | Vortex -->
+                    <div class="obs-tab-bar charts-tab-bar" id="obs-tab-bar">
+                        <button class="obs-tab chart-sub-tab active" data-tab="chart">Mass model</button>
+                        <button class="obs-tab chart-sub-tab" data-tab="obs-chart">Observations</button>
+                        <button class="obs-tab chart-sub-tab" data-tab="vortex">Vortex</button>
+                        <button class="obs-tab chart-sub-tab" data-tab="field-analysis" style="display: none;">Field Analysis</button>
                     </div>
 
                     <!-- Theory Toggle Bar (part of chart view content) -->
@@ -311,7 +311,7 @@
                         </div>
                     </div>
 
-                    <!-- Observation Data tab content (markdown-preview style, panel-level scroll) -->
+                    <!-- Observation Data (no submenu item; data available in Chart Data tab) -->
                     <div id="obs-data-face" class="obs-data-face" style="display: none;">
                         <div class="obs-font-toolbar">
                             <button class="obs-font-btn" data-dir="-1" title="Decrease font size">A&#8722;</button>
@@ -319,17 +319,6 @@
                         </div>
                         <div class="obs-data-content" id="obs-data-content">
                             <!-- Populated dynamically by showObsTabs() -->
-                        </div>
-                    </div>
-
-                    <!-- Chart Data tab: all data used to render the chart (exportable) -->
-                    <div id="chart-data-face" class="obs-data-face" style="display: none;">
-                        <div class="obs-font-toolbar">
-                            <button class="obs-font-btn" data-dir="-1" title="Decrease font size">A&#8722;</button>
-                            <button class="obs-font-btn" data-dir="1" title="Increase font size">A+</button>
-                        </div>
-                        <div class="obs-data-content" id="chart-data-content">
-                            <!-- Populated dynamically by renderChartDataTab() -->
                         </div>
                     </div>
 
@@ -362,8 +351,10 @@
                                 <div class="vortex-chart-wrap"><canvas id="vortexChartA"></canvas></div>
                             </div>
                             <div class="vortex-chart-block">
-                                <div class="vortex-chart-title">Figure 1b: Transformation T(r)</div>
                                 <div class="vortex-chart-wrap"><canvas id="vortexChartB"></canvas></div>
+                                <div class="vortex-chart-caption">
+                                    <p>This chart compares the GFD Velocity Field (above: covariant action applied to observed kinematics) with the GFD (Photometric mass model). The vertical axis is the ratio T(r) = M_derived / M_phot: the mass implied by the GFD velocity field (or by the observed rotation curve) divided by the mass from the photometric model. A ratio near 1 indicates agreement; deviation from 1 shows where the GFD Velocity Field implies more or less mass than the model.</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -376,6 +367,20 @@
                         </div>
                         <div class="obs-data-content" id="field-analysis-content">
                             <!-- Populated dynamically by loadFieldAnalysis() -->
+                        </div>
+                    </div>
+                    </div>
+
+                    <!-- Chart Data tab content (parent tab; exportable data) -->
+                    <div class="right-panel-tab-content" id="right-panel-tab-content-chart-data" data-tab-content="chart-data" style="display: none;">
+                        <div id="chart-data-face" class="obs-data-face">
+                            <div class="obs-font-toolbar">
+                                <button class="obs-font-btn" data-dir="-1" title="Decrease font size">A&#8722;</button>
+                                <button class="obs-font-btn" data-dir="1" title="Increase font size">A+</button>
+                            </div>
+                            <div class="obs-data-content" id="chart-data-content">
+                                <!-- Populated dynamically by renderChartDataTab() -->
+                            </div>
                         </div>
                     </div>
                 </div>

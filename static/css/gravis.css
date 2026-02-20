@@ -908,7 +908,7 @@ body {
 }
 
 /* =====================================================================
-   Theory Toggle Bar
+   Theory Toggle Bar (series data toggles; distinct from Charts submenu above)
    ===================================================================== */
 
 .theory-toggles {
@@ -2025,8 +2025,55 @@ input[type="range"]::-moz-range-thumb:hover {
 /* Data card styles removed: Data Sources is now in the Observation Data tab */
 
 /* ================================================================
-   OBSERVATION DATA TAB BAR + DATA PANEL
-   Appears in observation mode above the chart container.
+   RIGHT PANEL TOP-LEVEL TABS (Charts)
+   ================================================================ */
+.right-panel-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid #333;
+    margin: -20px -20px 0 -20px;
+    padding: 0 20px 0 0;
+    flex-shrink: 0;
+    background: #1a1a1a;
+}
+
+.right-panel-tab {
+    padding: 12px 20px;
+    background: transparent;
+    color: #808080;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 0.9em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.right-panel-tab:hover {
+    color: #b0b0b0;
+}
+
+.right-panel-tab.active {
+    color: #4da6ff;
+    border-bottom-color: #4da6ff;
+}
+
+.right-panel-tab-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Charts tab content: allow submenu bar to extend full panel width (overflow visible so negative margin isn't clipped) */
+.right-panel-tab-content[data-tab-content="charts"] {
+    overflow: visible;
+}
+
+/* ================================================================
+   CHARTS SUBMENU (nav strip under Charts tab, not badges)
+   + OBSERVATION DATA PANEL
    ================================================================ */
 .obs-tab-bar {
     display: flex;
@@ -2035,8 +2082,31 @@ input[type="range"]::-moz-range-thumb:hover {
     border-bottom: 1px solid #333;
     padding: 0 12px;
     flex-shrink: 0;
-    /* Bleed to panel edges (right-panel has 20px padding) */
-    margin: -20px -20px 12px -20px;
+    min-height: 40px;
+    box-sizing: border-box;
+}
+
+/* Submenu: full-width bar; bottom line spans entire panel; first item aligns with "Charts" tab (20px) */
+.obs-tab-bar.charts-tab-bar {
+    margin: 0 -20px 0 -20px;
+    padding: 0 20px 0 0;
+    align-items: stretch;
+    gap: 0;
+    flex-wrap: wrap;
+    min-height: 36px;
+    margin-bottom: 20px;
+    position: relative;
+    border-bottom: 1px solid #404040;
+}
+
+.charts-tab-bar-label {
+    color: #808080;
+    font-size: 0.78em;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 12px;
+    align-self: center;
 }
 
 .obs-tab {
@@ -2059,6 +2129,36 @@ input[type="range"]::-moz-range-thumb:hover {
 .obs-tab.active {
     color: #00E5FF;
     border-bottom-color: #00E5FF;
+}
+
+/* Charts submenu: tab-style nav (no pills). Distinct from series toggles below. */
+.obs-tab-bar .chart-sub-tab {
+    padding: 8px 16px;
+    border-radius: 0;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: #909090;
+    font-size: 0.8125em;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+/* First submenu item: align text with parent "Charts" tab (same 20px left padding as .right-panel-tab) */
+.obs-tab-bar.charts-tab-bar .chart-sub-tab:first-child {
+    padding-left: 20px;
+}
+
+.obs-tab-bar .chart-sub-tab:hover {
+    color: #c0c0c0;
+}
+
+.obs-tab-bar .chart-sub-tab.active {
+    color: #4da6ff;
+    border-bottom-color: #4da6ff;
+    background: transparent;
 }
 
 /* Observation Data tab: markdown-preview style.
@@ -2128,6 +2228,20 @@ input[type="range"]::-moz-range-thumb:hover {
 .vortex-chart-wrap canvas {
     max-width: 100%;
     max-height: 100%;
+}
+
+.vortex-chart-caption {
+    margin-top: 14px;
+    padding: 12px 0 0;
+    border-top: 1px solid #333;
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: #b0b0b0;
+    max-width: 56em;
+}
+
+.vortex-chart-caption p {
+    margin: 0;
 }
 
 /* Font size toolbar (A- / A+) in data and field analysis tabs */
