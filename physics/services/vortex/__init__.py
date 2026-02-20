@@ -1,15 +1,15 @@
 """
 Vortex Service: velocity curves and transformation from observations.
 
-Two methods, one per image:
-  Method 1 (figure_a): Raw velocity curve + optional fractional-variance curve
-    over observation span. If variance_pct is 0, skip FV (chart 2 = chart 1).
-  Method 2 (figure_b): Transformation T(r) = M_derived/M_phot. Chart 1 from raw
-    velocity; chart 2 from the velocity produced by method 1 (so method 2
-    uses method 1, no duplicated logic).
+Uses the same GFD field velocity as sst_topological_velocity / gfd_field_velocity_nails_it:
+  Observation -> defraction (6.2% Gaussian kernel) -> field velocity (covariant + Eq 75 Poisson).
+  No R_t, R_env; direct field reading.
 
-Variance: variance_pct (default 1.5). If 0, fractional variance step is skipped.
-  If > 0, s = (variance_pct/100) * sum((v - mean)^2) for the smoothing spline.
+Two methods, one per image:
+  Method 1 (figure_a): Field velocity from defraction + optional fractional-variance curve.
+  Method 2 (figure_b): Transformation T(r) = M_derived/M_phot using method 1 curves.
+
+Variance: variance_pct (default 1.5). If > 0, apply FV smoothing on top of defraction curve.
 
 Endpoints:
   POST /api/vortex/figure-a  -> { figure_a: { chart1, chart2 }, ... }
@@ -25,6 +25,7 @@ from flask import jsonify, request
 from physics.services import GravisService
 from physics.constants import A0, KPC_TO_M, G, M_SUN
 from physics.mass_model import enclosed_mass
+from physics.sst_topological_velocity import gfd_velocity_curve_sst, gfd_sst_velocity_decode_curve
 from data.galaxies import get_galaxy_by_id
 
 DEFAULT_VARIANCE_PCT = 1.5
@@ -146,8 +147,7 @@ def _compute_transformation(radii_pos, v_pos, mass_model, a0):
 def method_1_figure_a(galaxy_id, variance_pct=0.0):
     """
     Method 1: Figure A data (velocity curves).
-    variance_pct: 0 = skip FV (chart 2 same as chart 1); >0 = apply FV (e.g. 1.5).
-    Returns dict with figure_a, radii_fine, v_raw, v_fv_on_raw, obs, mass_model, etc.
+    Purple "GFD (Velocity smooth)" = forward from mass profile only (Eq 75 + SST). Same as panel script.
     """
     gal = get_galaxy_by_id(galaxy_id)
     if not gal:
@@ -160,25 +160,54 @@ def method_1_figure_a(galaxy_id, variance_pct=0.0):
     obs_v = np.array([float(o["v"]) for o in observations])
     obs_err = [max(float(o.get("err", 5.0)), 1.0) for o in observations]
 
-    r_min_obs = float(np.min(obs_r))
     r_max_obs = float(np.max(obs_r))
     chart_max = r_max_obs * 1.15
     num_points = 500
     radii_fine = np.linspace(-chart_max, chart_max, num_points)
 
+    # Grey dotted "GFD (Velocity raw)": unsmoothed curve from observations (spline interpolation only)
     v_raw = _smooth_velocity_curve(obs_r, obs_v, radii_fine, smoothing=0.0)
 
-    if variance_pct <= 0:
-        v_fv_on_raw = v_raw
+    # Purple "GFD (Velocity smooth)": GFD from mass profile (Eq 75 + SST). Start at 0.5 kpc so no ramp from zero (match Python script).
+    GFD_MIN_R_KPC = 0.5
+    mask_pos = radii_fine > 0
+    radii_pos = radii_fine[mask_pos]
+    r_abs = np.abs(radii_fine)
+    mass_model = gal.get("mass_model")
+    if mass_model and len(radii_pos) > 0:
+        radii_gfd = radii_pos[radii_pos >= GFD_MIN_R_KPC]
+        if len(radii_gfd) > 0:
+            v_field_pos = np.array(gfd_velocity_curve_sst(
+                radii_gfd.tolist(), lambda r, mm=mass_model: enclosed_mass(r, mm), A0), dtype=float)
+            v_at_min = float(v_field_pos[0])
+            v_fv_on_raw = np.where(r_abs < GFD_MIN_R_KPC, v_at_min, np.interp(r_abs, radii_gfd, v_field_pos))
+        else:
+            v_field_pos = np.array([], dtype=float)
+            v_fv_on_raw = np.full_like(radii_fine, np.nan)
     else:
-        frac = variance_pct / 100.0
-        v_mean_raw = np.mean(v_raw)
-        s_param = float(frac * np.sum((v_raw - v_mean_raw) ** 2))
-        spl = UnivariateSpline(radii_fine, v_raw, s=s_param, k=min(3, num_points - 1))
-        v_fv_on_raw = spl(radii_fine)
+        v_field_pos = np.array([], dtype=float)
+        v_fv_on_raw = np.full_like(radii_fine, np.nan)
 
-    in_obs_span = (radii_fine >= -r_max_obs) & (radii_fine <= r_max_obs)
-    v_fv_display = np.where(in_obs_span, v_fv_on_raw, np.nan)
+    # Show GFD curve over full symmetric range (match Python vortex plot: red line full -R to +R)
+    v_fv_display = np.where(np.isfinite(v_fv_on_raw), v_fv_on_raw, np.nan)
+
+    # GFD velocity decode (no mass input): obs -> defraction -> field velocity. Same as observational chart.
+    v_decode_display = np.full_like(radii_fine, np.nan)
+    if len(obs_r) >= 2:
+        radii_decode = radii_pos[radii_pos >= GFD_MIN_R_KPC]
+        if len(radii_decode) > 0:
+            v_decode_pos = gfd_sst_velocity_decode_curve(
+                obs_r.tolist(), obs_v.tolist(), radii_decode.tolist(), A0)
+            if v_decode_pos:
+                v_decode_pos = np.array(v_decode_pos, dtype=float)
+                v_at_min_d = float(v_decode_pos[0])
+                v_decode_on_full = np.where(
+                    r_abs < GFD_MIN_R_KPC, v_at_min_d,
+                    np.interp(r_abs, radii_decode, v_decode_pos))
+                v_decode_display = np.where(np.isfinite(v_decode_on_full), v_decode_on_full, np.nan)
+
+    def _safe_vlist(arr):
+        return [float(x) if np.isfinite(x) else None for x in np.asarray(arr)]
 
     figure_a = {
         "chart1": {
@@ -191,7 +220,8 @@ def method_1_figure_a(galaxy_id, variance_pct=0.0):
         "chart2": {
             "radii": radii_fine.tolist(),
             "v_raw": v_raw.tolist(),
-            "v_fv": [float(x) if np.isfinite(x) else None for x in v_fv_display],
+            "v_fv": _safe_vlist(v_fv_display),
+            "gfd_sst_velocity_decode": _safe_vlist(v_decode_display),
             "obs_r": obs_r.tolist(),
             "obs_v": obs_v.tolist(),
             "obs_err": obs_err,
@@ -199,8 +229,6 @@ def method_1_figure_a(galaxy_id, variance_pct=0.0):
         },
     }
 
-    mask_pos = radii_fine > 0
-    radii_pos = radii_fine[mask_pos]
     mass_model = gal.get("mass_model")
 
     return {
@@ -235,14 +263,20 @@ def method_2_figure_b(galaxy_id, variance_pct=0.0):
     trans_raw = _compute_transformation(radii_pos, v_raw[mask_pos], mass_model, A0)
     trans_fv = _compute_transformation(radii_pos, v_fv_on_raw[mask_pos], mass_model, A0)
 
+    def _safe_tolist(arr):
+        """Convert array to list, replacing nan with None for JSON serialization."""
+        if arr is None or len(arr) == 0:
+            return []
+        return [None if not np.isfinite(x) else float(x) for x in np.asarray(arr)]
+
     figure_b = {
         "chart1": {
             "r_kpc": trans_raw["r_kpc"].tolist() if trans_raw else [],
-            "ratio_T": trans_raw["ratio_T"].tolist() if trans_raw else [],
+            "ratio_T": _safe_tolist(trans_raw["ratio_T"]) if trans_raw else [],
         },
         "chart2": {
             "r_kpc": trans_fv["r_kpc"].tolist() if trans_fv else [],
-            "ratio_T": trans_fv["ratio_T"].tolist() if trans_fv else [],
+            "ratio_T": _safe_tolist(trans_fv["ratio_T"]) if trans_fv else [],
             "variance_pct": variance_pct,
         },
     }

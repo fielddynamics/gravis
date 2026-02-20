@@ -300,8 +300,11 @@
                         <label class="theory-chip" data-series="gfd_sigma_old" style="--chip-color: #ff44dd; display: none;" title="(Legacy) GFD Sigma from slow Bayesian fit">
                             <input type="checkbox"> GFD Sigma (Bayesian)
                         </label>
-                        <label class="theory-chip" data-series="gfd_velocity" style="--chip-color: #aa44ff; display: none;" title="GFD (Velocity): smoothed observed rotation curve (6.2% fractional variance)">
+                        <label class="theory-chip" data-series="gfd_velocity" style="--chip-color: #aa44ff; display: none;" title="GFD (Velocity): 6.2% defraction (Gaussian kernel). Weighted average, not exact match to observational mean.">
                             <input type="checkbox" checked> GFD (Velocity)
+                        </label>
+                        <label class="theory-chip" data-series="gfd_sst_velocity_decode" style="--chip-color: #1E88E5;" title="GFD velocity decode (no mass input): observations to defraction smooth to field velocity">
+                            <input type="checkbox" checked> GFD velocity decode
                         </label>
                         <label class="theory-chip" data-series="newtonian" style="--chip-color: #ff6b6b;" title="Newtonian gravity (baryons only)">
                             <input type="checkbox"> Newtonian
@@ -360,6 +363,9 @@
                             </label>
                             <label class="theory-chip" data-series="vortex_smooth" style="--chip-color: #aa44ff;" title="GFD velocity with 1.5% fractional variance">
                                 <input type="checkbox" checked> GFD (Velocity smooth)
+                            </label>
+                            <label class="theory-chip" data-series="vortex_decode" style="--chip-color: #1E88E5;" title="GFD velocity decode (no mass input): obs to field velocity">
+                                <input type="checkbox" checked> GFD velocity decode
                             </label>
                             <label class="theory-chip" data-series="vortex_observed" style="--chip-color: #FFC107;" title="Published rotation curve measurements">
                                 <input type="checkbox" checked> Observed Data

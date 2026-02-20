@@ -7,6 +7,7 @@ owns all rotation-specific API endpoints under /api/rotation/*.
 
 Endpoints:
     POST /api/rotation/photometric-curve - unified photometric chart (one engine run, all theory curves)
+    POST /api/rotation/gfd-velocity-curve-v2 - velocity curve v2 (deflection = SST direct reading, no R_t/R_env)
     POST /api/rotation/curve           - compute rotation curves (prediction)
     POST /api/rotation/inference       - compute rotation curves (optimized)
     POST /api/rotation/infer-curve     - (legacy alias for /inference)
@@ -43,6 +44,12 @@ from physics.services.rotation.photometry import derive_mass_parameters_from_pho
 from physics.services.rotation.vortex_bridge import (
     mirror_curve_with_cutoff,
     truncate_to_first_obs,
+)
+from physics.sst_topological_velocity import (
+    M_enc_from_velocity,
+    g_source_from_velocity,
+    gfd_velocity_curve_sst,
+    gfd_sst_velocity_decode_curve,
 )
 
 
@@ -477,6 +484,9 @@ class RotationService(GravisService):
         elif r_first_obs > 0:
             radii, series_dict = truncate_to_first_obs(
                 radii, series_dict, r_first_obs)
+        # GFD curve matches Python script: start at 0.5 kpc so curve does not ramp up from zero
+        radii, series_dict = truncate_to_first_obs(
+            radii, series_dict, max(r_first_obs, 0.5))
 
         chart = {
             "radii": radii,
@@ -486,6 +496,9 @@ class RotationService(GravisService):
             "cdm_photometric": series_dict.get("cdm_photometric", []),
         }
 
+        # GFD velocity = forward from mass profile only (Eq 75 + SST). Same curve as panel script.
+        chart["gfd_velocity"] = [round(float(v), 4) for v in gfd_velocity_curve_sst(
+            radii, lambda r: enclosed_mass(r, pm), a0_eff)]
         obs_r = []
         obs_v = []
         for o in observations:
@@ -494,13 +507,12 @@ class RotationService(GravisService):
             if r > 0 and v > 0:
                 obs_r.append(r)
                 obs_v.append(v)
-        if len(obs_r) >= 2:
-            chart["gfd_velocity"] = _smooth_observed_velocity(
-                obs_r, obs_v, radii, smoothing=0.0,
-                variance_pct=float(gfd_velocity_smoothing_pct))
-        else:
-            chart["gfd_velocity"] = []
         n_obs = len(obs_r)
+        if n_obs >= 2:
+            chart["gfd_sst_velocity_decode"] = [round(float(v), 4) for v in gfd_sst_velocity_decode_curve(
+                obs_r, obs_v, radii, a0_eff)]
+        else:
+            chart["gfd_sst_velocity_decode"] = []
         residuals = []
         if n_obs > 0 and result.radii and result.series("gfd"):
             r_list = list(result.radii)
@@ -531,6 +543,53 @@ class RotationService(GravisService):
             "n_obs": n_obs,
         }, None, None
 
+    def compute_gfd_velocity_curve_v2(self, galaxy_id, num_points=500,
+                                       accel_ratio=1.0, max_radius=50.0,
+                                       deflection_smoothing_pct=6.2,
+                                       include_inferred=True):
+        """Velocity curve v2: GFD field velocity from mass profile (Eq 75 + SST). Same as panel script."""
+        gal = get_galaxy_by_id(galaxy_id)
+        if not gal:
+            return None, {"error": "Galaxy not found: %s" % galaxy_id}, 404
+        mass_model = gal.get("mass_model")
+        if not mass_model:
+            return None, {"error": "Galaxy has no mass model for v2 curve"}, 400
+        observations = gal.get("observations", [])
+        obs_r = [float(o["r"]) for o in observations if o.get("r") and float(o.get("r", 0)) > 0 and o.get("v") and float(o.get("v", 0)) > 0]
+        obs_v = [float(o["v"]) for o in observations if o.get("r") and float(o.get("r", 0)) > 0 and o.get("v") and float(o.get("v", 0)) > 0]
+        if obs_r:
+            obs_r, obs_v = zip(*sorted(zip(obs_r, obs_v)))
+            obs_r, obs_v = list(obs_r), list(obs_v)
+        r_min = max(0.01, min(obs_r) * 0.5) if obs_r else 0.5
+        r_max = min(max_radius, max(obs_r) * 1.2) if obs_r else float(max_radius)
+        radii = [round(x, 6) for x in np.linspace(r_min, r_max, num_points).tolist()]
+        a0_eff = constants.A0 * accel_ratio
+        gfd_velocity_v2 = [round(float(v), 4) for v in gfd_velocity_curve_sst(
+            radii, lambda r, mm=mass_model: enclosed_mass(r, mm), a0_eff)]
+
+        out = {
+            "galaxy": gal.get("name", galaxy_id),
+            "radii": radii,
+            "gfd_velocity_v2": gfd_velocity_v2,
+            "n_obs": len(obs_r),
+        }
+        if include_inferred and gfd_velocity_v2:
+            g_source_list = []
+            M_enc_list = []
+            for i, r in enumerate(radii):
+                v_val = gfd_velocity_v2[i] if i < len(gfd_velocity_v2) else 0.0
+                if v_val > 0 and r > 0:
+                    g_source_list.append(round(
+                        g_source_from_velocity(v_val, r, a0_eff), 6))
+                    M_enc_list.append(round(
+                        M_enc_from_velocity(v_val, r, a0_eff), 2))
+                else:
+                    g_source_list.append(0.0)
+                    M_enc_list.append(0.0)
+            out["g_source_ms2"] = g_source_list
+            out["inferred_M_enc_solar"] = M_enc_list
+        return out, None, None
+
     def register_routes(self, bp):
         """Mount all rotation-specific API endpoints."""
         service = self
@@ -555,6 +614,28 @@ class RotationService(GravisService):
                 galaxy_id, num_points=num_points, accel_ratio=accel_ratio,
                 max_radius=max_radius, mode=mode,
                 gfd_velocity_smoothing_pct=gfd_velocity_smoothing_pct)
+            if err is not None:
+                return jsonify(err), status if status else 400
+            return jsonify(result)
+
+        # -- GFD velocity curve v2: deflection = direct SST field reading (no R_t, R_env) --
+        @bp.route("/rotation/gfd-velocity-curve-v2", methods=["POST"])
+        def rotation_gfd_velocity_curve_v2():
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request body must be JSON"}), 400
+            galaxy_id = data.get("galaxy_id")
+            if not galaxy_id:
+                return jsonify({"error": "galaxy_id is required"}), 400
+            num_points = max(10, min(int(data.get("num_points", 500)), 500))
+            accel_ratio = float(data.get("accel_ratio", 1.0))
+            max_radius = float(data.get("max_radius", 50.0))
+            deflection_smoothing_pct = float(data.get("deflection_smoothing_pct", 6.2))
+            include_inferred = data.get("include_inferred", True)
+            result, err, status = service.compute_gfd_velocity_curve_v2(
+                galaxy_id, num_points=num_points, accel_ratio=accel_ratio,
+                max_radius=max_radius, deflection_smoothing_pct=deflection_smoothing_pct,
+                include_inferred=include_inferred)
             if err is not None:
                 return jsonify(err), status if status else 400
             return jsonify(result)

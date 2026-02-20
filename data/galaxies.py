@@ -453,6 +453,31 @@ PREDICTION_GALAXIES = [
             "Corbelli 2014 A&A (VLA+GBT)",
         ],
     },
+    {
+        "id": "m33_vortex",
+        "name": "M33 Vortex (M_disk=1.3e11 M_sun, R_d=4.14 kpc)",
+        "distance": 20,
+        "galactic_radius": 45,
+        "mass": 11.114,
+        "accel": 1.0,
+        "mass_model": {
+            "bulge": {"M": 0, "a": 0.2},
+            "disk":  {"M": 1.30e11, "Rd": 4.14},
+            "gas":   {"M": 0, "Rd": 4.0},
+        },
+        "observations": [
+            {"r": 8.0, "v": 250.0, "err": 12},
+            {"r": 12.0, "v": 260.0, "err": 8},
+            {"r": 15.0, "v": 260.0, "err": 8},
+            {"r": 20.0, "v": 245.0, "err": 10},
+            {"r": 25.0, "v": 230.0, "err": 12},
+            {"r": 30.0, "v": 235.0, "err": 12},
+            {"r": 35.0, "v": 250.0, "err": 15},
+        ],
+        "references": [
+            "M33 vortex plot: GFD forward (M_disk, R_d) single exponential disk",
+        ],
+    },
     # === SPARC SPIRALS with well-measured HI radii (Lelli+2016) ===
     # R_HI = HI radius at 1 M_sun/pc^2 column density (SPARC Table 1).
     # galactic_radius (R_env) set to ~1.15 * R_HI following existing catalog

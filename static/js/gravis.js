@@ -1042,6 +1042,17 @@ const chart = new Chart(ctx, {
                 cubicInterpolationMode: 'monotone',
                 tension: 0.4,
                 pointRadius: 0
+            },
+            // Dataset 12: GFD velocity decode (no mass input) - obs -> defraction -> field velocity
+            {
+                label: 'GFD velocity decode (no mass input)',
+                data: [],
+                borderColor: '#1E88E5',
+                backgroundColor: 'transparent',
+                borderWidth: 2.2,
+                cubicInterpolationMode: 'monotone',
+                tension: 0.4,
+                pointRadius: 0
             }
         ]
     },
@@ -1172,6 +1183,7 @@ var vortexChartBInstance = null;
 var vortexCurrentVariance = 1.5;
 var lastVortexRotationData = null;
 var lastVortexPhotometricData = null;
+var lastVortexV2Data = null;
 
 function getVpsDeltaVData() {
     var src = (photometricResult && photometricResult.chart) || (sandboxResult && sandboxResult.chart);
@@ -1754,6 +1766,15 @@ function updateObservationCurvesOnly() {
     chart.data.datasets[11].label = 'GFD (Velocity)';
     chart.data.datasets[11].hidden = !isAutoFitted;
 
+    var decodeVelsOnly = splineSource.gfd_sst_velocity_decode || [];
+    var decodeDataOnly = [];
+    for (var k = 0; k < velRadii.length; k++) {
+        if (velRadii[k] > xMax) break;
+        if (decodeVelsOnly[k] !== undefined) decodeDataOnly.push({ x: velRadii[k], y: decodeVelsOnly[k] });
+    }
+    chart.data.datasets[12].data = decodeDataOnly;
+    chart.data.datasets[12].hidden = !isChipEnabled('gfd_sst_velocity_decode');
+
     chart.update('none');
 }
 
@@ -1853,6 +1874,19 @@ function renderSandboxCurves() {
     chart.data.datasets[11].cubicInterpolationMode = 'monotone';
     chart.data.datasets[11].tension = 0.4;
     chart.data.datasets[11].hidden = !isAutoFitted;
+    // Dataset 12: GFD velocity decode (no mass input)
+    var decodeVels = velSource.gfd_sst_velocity_decode || [];
+    var decodeData = [];
+    for (var j = 0; j < velRadii.length; j++) {
+        if (velRadii[j] > xMax) break;
+        if (decodeVels[j] !== undefined) {
+            decodeData.push({ x: velRadii[j], y: decodeVels[j] });
+        }
+    }
+    chart.data.datasets[12].data = decodeData;
+    chart.data.datasets[12].label = 'GFD velocity decode (no mass input)';
+    chart.data.datasets[12].borderColor = '#1E88E5';
+    chart.data.datasets[12].hidden = !isChipEnabled('gfd_sst_velocity_decode');
 
     // Newton/MOND/CDM from unified photometric chart when present
     var newtonianVels = sandboxResult.chart.newtonian_photometric || [];
@@ -3434,7 +3468,7 @@ function isVortexChipEnabled(seriesKey) {
     return cb ? cb.checked : true;
 }
 
-var vortexChipToDatasetIndex = { vortex_raw: 0, vortex_smooth: 1, vortex_observed: 2, vortex_mond: 3, vortex_cdm: 4, vortex_gfd: 5 };
+var vortexChipToDatasetIndex = { vortex_raw: 0, vortex_smooth: 1, vortex_observed: 2, vortex_mond: 3, vortex_cdm: 4, vortex_gfd: 5, vortex_decode: 6 };
 
 function initVortexChipListeners() {
     var container = document.getElementById('vortex-theory-toggles');
@@ -3482,6 +3516,7 @@ function loadVortexTab(variancePct) {
     if (!galaxyId) {
         lastVortexRotationData = null;
         lastVortexPhotometricData = null;
+        lastVortexV2Data = null;
         renderVortexCharts(null, null);
         return;
     }
@@ -3496,18 +3531,22 @@ function loadVortexTab(variancePct) {
     var gr = (example && example.galactic_radius) ? parseFloat(example.galactic_radius) : parseFloat(distanceSlider.value);
     var accelRatio = parseFloat(accelSlider.value);
 
+    var v2Body = JSON.stringify({ galaxy_id: galaxyId, num_points: 500, max_radius: predMaxR, accel_ratio: accelRatio, deflection_smoothing_pct: 6.2, include_inferred: false });
     Promise.all([
         fetch('/api/vortex/figure-a', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body }).then(function(r) { return r.ok ? r.json() : null; }),
         fetch('/api/vortex/figure-b', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body }).then(function(r) { return r.ok ? r.json() : null; }),
         fetchRotationCurve(predMaxR, accelRatio, massModel, predObs, gr, 'default').then(function(d) { return d; }).catch(function() { return null; }),
-        fetchPhotometricData(galaxyId, 'vortex_chart', predMaxR).then(function(d) { return d; }).catch(function() { return null; })
+        fetchPhotometricData(galaxyId, 'vortex_chart', predMaxR).then(function(d) { return d; }).catch(function() { return null; }),
+        fetch('/api/rotation/gfd-velocity-curve-v2', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: v2Body }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
     ]).then(function(results) {
         lastVortexRotationData = results[2] || null;
         lastVortexPhotometricData = results[3] || null;
+        lastVortexV2Data = results[4] || null;
         renderVortexCharts(results[0], results[1]);
     }).catch(function() {
         lastVortexRotationData = null;
         lastVortexPhotometricData = null;
+        lastVortexV2Data = null;
         renderVortexCharts(null, null);
     });
 }
@@ -3583,6 +3622,13 @@ function renderVortexCharts(figA, figB) {
     if (gfdData.length === 0 && chart && chart.data && chart.data.datasets[1] && chart.data.datasets[1].data) {
         gfdData = chart.data.datasets[1].data.slice();
     }
+    var decodePoints = [];
+    if (c2.gfd_sst_velocity_decode && radii.length === (c2.gfd_sst_velocity_decode || []).length) {
+        decodePoints = radii.map(function(r, i) {
+            var y = c2.gfd_sst_velocity_decode[i];
+            return (y != null && typeof y === 'number') ? { x: r, y: y } : null;
+        }).filter(function(p) { return p !== null; });
+    }
     var mondData = [];
     var cdmData = [];
     if (lastVortexPhotometricData && lastVortexPhotometricData.chart && lastVortexPhotometricData.chart.radii) {
@@ -3614,7 +3660,8 @@ function renderVortexCharts(figA, figB) {
         { label: 'Observed', data: obsPoints, borderColor: '#FFC107', backgroundColor: '#FFC107', pointRadius: 5, showLine: false, hidden: !isVortexChipEnabled('vortex_observed') },
         { label: 'MOND', data: mondData, borderColor: '#9966ff', borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_mond') },
         { label: 'CDM', data: cdmData, borderColor: '#ffffff', borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_cdm') },
-        { label: 'GFD (Photometric)', data: gfdData, borderColor: 'rgba(0, 229, 160, 0.9)', backgroundColor: 'transparent', borderDash: [8, 4], borderWidth: 2, tension: 0.3, showLine: true, pointRadius: 0, pointHoverRadius: 0, pointStyle: 'circle', pointBackgroundColor: 'rgba(0, 229, 160, 0)', pointBorderColor: 'rgba(0, 229, 160, 0)', pointBorderWidth: 0, hidden: !isVortexChipEnabled('vortex_gfd') }
+        { label: 'GFD (Photometric)', data: gfdData, borderColor: 'rgba(0, 229, 160, 0.9)', backgroundColor: 'transparent', borderDash: [8, 4], borderWidth: 2, tension: 0.3, showLine: true, pointRadius: 0, pointHoverRadius: 0, pointStyle: 'circle', pointBackgroundColor: 'rgba(0, 229, 160, 0)', pointBorderColor: 'rgba(0, 229, 160, 0)', pointBorderWidth: 0, hidden: !isVortexChipEnabled('vortex_gfd') },
+        { label: 'GFD velocity decode (no mass input)', data: decodePoints, borderColor: '#1E88E5', borderWidth: 2.2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_decode') }
     ];
 
     vortexChartAInstance = new Chart(canvasA.getContext('2d'), {
@@ -3834,8 +3881,8 @@ function chartDataToJSON() {
             return { r_kpc: Math.round(o.r * 100) / 100, v_km_s: Math.round((o.v || 0) * 100) / 100, err_km_s: (o.err != null) ? Math.round(o.err * 100) / 100 : null };
         });
     }
-    var seriesIndices = [0, 1, 2, 3, 7, 11];
-    var seriesKeys = ['newtonian', 'gfd_photometric', 'mond', 'observed', 'cdm', 'gfd_velocity'];
+    var seriesIndices = [0, 1, 2, 3, 7, 11, 12];
+    var seriesKeys = ['newtonian', 'gfd_photometric', 'mond', 'observed', 'cdm', 'gfd_velocity', 'gfd_sst_velocity_decode'];
     if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
         for (var s = 0; s < seriesIndices.length; s++) {
             var idx = seriesIndices[s];
@@ -4008,7 +4055,8 @@ function renderChartDataTab() {
         { idx: 0, id: 'newtonian', filename: 'newtonian.csv' },
         { idx: 2, id: 'mond', filename: 'mond.csv' },
         { idx: 7, id: 'cdm', filename: 'cdm.csv' },
-        { idx: 11, id: 'gfd-velocity', filename: 'gfd_velocity.csv' }
+        { idx: 11, id: 'gfd-velocity', filename: 'gfd_velocity.csv' },
+        { idx: 12, id: 'gfd-sst-velocity-decode', filename: 'gfd_sst_velocity_decode.csv' }
     ];
     if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
         for (var sc = 0; sc < seriesConfig.length; sc++) {
@@ -4895,6 +4943,7 @@ var theoryDatasetMap = {
     'gfd_sigma_old': [8],       // Legacy Bayesian GFD Sigma (hidden)
     'gfd_spline':    [10],      // GFD Sigma (fast observation fit)
     'gfd_velocity':  [11],      // GFD (Velocity) - smoothed observed curve from rotation service
+    'gfd_sst_velocity_decode': [12],  // GFD velocity decode (no mass input)
     'gfd_symmetric': [9],       // Legacy GFD (Observed) - hidden
     'mond':          [2],       // Classical MOND
     'cdm':           [7]        // CDM + NFW
