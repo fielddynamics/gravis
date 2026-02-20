@@ -47,9 +47,37 @@
                         <div class="observations-panel-body">
                             <select class="observations-dropdown" id="examples-dropdown" onchange="loadExample()">
                             </select>
-                            <button class="add-observation-btn" disabled title="Coming soon">
-                                + Add New Observation
+                            <button type="button" class="add-observation-btn add-from-sparc-btn" id="add-from-sparc-btn" title="Import a galaxy from the SPARC catalog">
+                                + Add from SPARC
                             </button>
+                            <button type="button" class="add-observation-btn add-other-observation-btn" disabled title="Coming soon">
+                                Add observation (other source)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- SPARC Import Overlay -->
+                    <div id="sparc-import-overlay" class="sparc-import-overlay" role="dialog" aria-modal="true" aria-labelledby="sparc-import-title" style="display: none;">
+                        <div class="sparc-import-container">
+                            <div class="sparc-import-header">
+                                <h2 id="sparc-import-title">Add observation from SPARC</h2>
+                                <button type="button" class="sparc-import-close" id="sparc-import-close" aria-label="Close">&times;</button>
+                            </div>
+                            <div class="sparc-import-toolbar">
+                                <label for="sparc-search-input" class="visually-hidden">Search by galaxy id</label>
+                                <input type="text" id="sparc-search-input" class="sparc-import-search" placeholder="Search by galaxy id (e.g. ngc3198)" aria-label="Search by galaxy id" autocomplete="off">
+                            </div>
+                            <p class="sparc-import-list-label" id="sparc-import-list-label">Select a galaxy to import</p>
+                            <div class="sparc-import-list-wrap">
+                                <div id="sparc-import-loading" class="sparc-import-loading" style="display: none;">Loading catalog...</div>
+                                <ul id="sparc-import-list" class="sparc-import-list" role="listbox" aria-label="Galaxies available for import"></ul>
+                                <div id="sparc-import-empty" class="sparc-import-empty" style="display: none;">No galaxies match your search.</div>
+                            </div>
+                            <div class="sparc-import-actions">
+                                <div id="sparc-import-message" class="sparc-import-message" role="alert" aria-live="polite" style="display: none;"></div>
+                                <button type="button" class="sparc-import-btn" id="sparc-import-btn" disabled>Import</button>
+                                <button type="button" class="sparc-import-close-btn" id="sparc-import-close-btn">Close</button>
+                            </div>
                         </div>
                     </div>
 
@@ -272,8 +300,8 @@
                         <label class="theory-chip" data-series="gfd_sigma_old" style="--chip-color: #ff44dd; display: none;" title="(Legacy) GFD Sigma from slow Bayesian fit">
                             <input type="checkbox"> GFD Sigma (Bayesian)
                         </label>
-                        <label class="theory-chip" data-series="gfd_accel" style="--chip-color: #aa44ff; display: none;" title="GFD derived from observed rotation curve">
-                            <input type="checkbox" checked> GFD (Observed)
+                        <label class="theory-chip" data-series="gfd_velocity" style="--chip-color: #aa44ff; display: none;" title="GFD (Velocity): smoothed observed rotation curve (6.2% fractional variance)">
+                            <input type="checkbox" checked> GFD (Velocity)
                         </label>
                         <label class="theory-chip" data-series="newtonian" style="--chip-color: #ff6b6b;" title="Newtonian gravity (baryons only)">
                             <input type="checkbox"> Newtonian

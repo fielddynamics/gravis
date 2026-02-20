@@ -1032,9 +1032,9 @@ const chart = new Chart(ctx, {
                 pointRadius: 0,
                 hidden: true
             },
-            // Dataset 11: GFD (Observed)
+            // Dataset 11: GFD (Velocity) - smoothed observed curve (observations chart)
             {
-                label: 'GFD (Observed)',
+                label: 'GFD (Velocity)',
                 data: [],
                 borderColor: '#aa44ff',
                 backgroundColor: 'transparent',
@@ -1177,13 +1177,13 @@ function getVpsDeltaVData() {
     var src = (photometricResult && photometricResult.chart) || (sandboxResult && sandboxResult.chart);
     if (!src || !src.radii) return [];
     var radii = src.radii;
-    var accel = src.gfd_accel || [];
+    var gfdVel = src.gfd_velocity || [];
     var photo = src.gfd_photometric || [];
     var out = [];
     for (var i = 0; i < radii.length; i++) {
-        var a = accel[i] != null ? accel[i] : 0;
+        var v = gfdVel[i] != null ? gfdVel[i] : 0;
         var p = photo[i] != null ? photo[i] : 0;
-        out.push({ x: radii[i], y: a - p });
+        out.push({ x: radii[i], y: v - p });
     }
     return out;
 }
@@ -1567,23 +1567,14 @@ let observationFetchPromise = null;
 
 async function fetchPhotometricData(galaxyId, chartMode, maxRadius) {
     try {
+        var maxR = (maxRadius != null && maxRadius > 0) ? maxRadius : 50;
         var payload = {
             galaxy_id: galaxyId,
             num_points: 500,
-            mode: 'mass_model'
+            max_radius: maxR,
+            mode: (chartMode === 'vortex' || chartMode === 'vortex_chart') ? 'vortex' : 'default'
         };
-        if (chartMode === 'vortex') {
-            payload.chart_mode = 'vortex';
-            if (maxRadius != null && maxRadius > 0) {
-                payload.max_radius = maxRadius;
-            }
-        }
-        if (chartMode === 'vortex_chart') {
-            if (maxRadius != null && maxRadius > 0) {
-                payload.max_radius = maxRadius;
-            }
-        }
-        const resp = await fetch('/api/sandbox/photometric', {
+        const resp = await fetch('/api/rotation/photometric-curve', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1616,31 +1607,26 @@ async function fetchPhotometricData(galaxyId, chartMode, maxRadius) {
 }
 
 /**
- * Fetch GFD curve from manually set mass model (slider values).
- * Same API as photometric but mode 'manual' and mass_model in body.
- * Used when user has changed mass sliders after loading an example.
+ * Fetch GFD and theory curves from manually set mass model (slider values).
+ * Uses enterprise rotation/curve so all curves come from one engine run.
  */
 async function fetchGfdFromMassModel(massModel, maxRadius, accelRatio) {
     try {
-        const resp = await fetch('/api/sandbox/photometric', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                mode: 'manual',
-                mass_model: massModel,
-                num_points: 500,
-                max_radius: maxRadius,
-                accel_ratio: accelRatio
-            })
-        });
-        if (!resp.ok) return;
-        var result = await resp.json();
-        if (!sandboxResult) return;
+        var gr = getGalacticRadius();
+        var data = await fetchRotationCurve(maxRadius, accelRatio, massModel, [], gr);
+        if (!data || !sandboxResult) return;
         sandboxResult = {
-            chart: result.chart,
-            field_geometry: result.field_geometry,
+            chart: {
+                radii: data.radii || [],
+                gfd_photometric: data.dtg || [],
+                newtonian_photometric: data.newtonian || [],
+                mond_photometric: data.mond || [],
+                cdm_photometric: data.cdm || []
+            },
+            field_geometry: data.field_geometry || {},
             sparc_r_hi_kpc: sandboxResult.sparc_r_hi_kpc,
             photometric_mass_model: sandboxResult.photometric_mass_model,
+            cdm_halo: data.cdm_halo || null,
             gfd_source: 'manual'
         };
         renderSandboxCurves();
@@ -1662,6 +1648,7 @@ async function fetchObservationData(galaxyId) {
         });
         if (!resp.ok) return;
         var result = await resp.json();
+        if (!photometricResult || !photometricResult.chart) return;
         if (result.chart && result.chart.gfd_spline) {
             photometricResult.chart.gfd_spline = result.chart.gfd_spline;
             photometricResult.chart.gfd_covariant_spline =
@@ -1680,15 +1667,20 @@ async function fetchObservationData(galaxyId) {
             photometricResult.accel_ratio_fitted =
                 result.accel_ratio_fitted;
         }
+        // Merge inference-only fields into sandboxResult; do not replace chart (theory curves stay from rotation).
+        if (result.rms != null) sandboxResult.rms = result.rms;
+        if (result.chi2_dof != null) sandboxResult.chi2_dof = result.chi2_dof;
+        if (result.n_obs != null) sandboxResult.n_obs = result.n_obs;
+        if (result.accel_rms != null) sandboxResult.accel_rms = result.accel_rms;
+        if (result.vortex_signal_spline) sandboxResult.vortex_signal_spline = result.vortex_signal_spline;
+        if (result.vortex_signal_accel) sandboxResult.vortex_signal_accel = result.vortex_signal_accel;
+        if (result.accel_ratio_fitted != null) sandboxResult.accel_ratio_fitted = result.accel_ratio_fitted;
+        if (result.vortex_signal) sandboxResult.vortex_signal = result.vortex_signal;
+        if (result.residuals) sandboxResult.residuals = result.residuals;
         if (isAutoFitted) {
-            sandboxResult = result;
             renderSandboxCurves();
         } else {
             updateObservationCurvesOnly();
-            if (pinnedObservations && pinnedObservations.length > 0 && result.chart && result.chart.gfd_accel) {
-                sandboxResult = result;
-                navigateTo('charts', 'obs-chart');
-            }
         }
         updateDiagnosticsPanel();
     } catch (e) {
@@ -1747,18 +1739,19 @@ function updateObservationCurvesOnly() {
         }
     }
     chart.data.datasets[10].data = splineData;
-    chart.data.datasets[10].hidden = true;  // Never show spline line; GFD (Observed) is dataset 11 only
+    chart.data.datasets[10].hidden = true;  // Never show spline line; GFD (Velocity) is dataset 11 only
 
-    var accelVels = splineSource.gfd_accel || [];
-    var accelRadii = splineSource.radii || [];
-    var accelData = [];
-    for (var j = 0; j < accelRadii.length; j++) {
-        if (accelRadii[j] > xMax) break;
-        if (accelVels[j] !== undefined) {
-            accelData.push({ x: accelRadii[j], y: accelVels[j] });
+    var gfdVelVels = splineSource.gfd_velocity || [];
+    var velRadii = splineSource.radii || [];
+    var velData = [];
+    for (var j = 0; j < velRadii.length; j++) {
+        if (velRadii[j] > xMax) break;
+        if (gfdVelVels[j] !== undefined) {
+            velData.push({ x: velRadii[j], y: gfdVelVels[j] });
         }
     }
-    chart.data.datasets[11].data = accelData;
+    chart.data.datasets[11].data = velData;
+    chart.data.datasets[11].label = 'GFD (Velocity)';
     chart.data.datasets[11].hidden = !isAutoFitted;
 
     chart.update('none');
@@ -1829,30 +1822,30 @@ function renderSandboxCurves() {
     chart.data.datasets[8].data = [];
     chart.data.datasets[8].hidden = true;
 
-    // Dataset 10: GFD (Observed), magenta solid
+    // Dataset 10: GFD Sigma spline (hidden; observation fit)
     chart.data.datasets[10].data = splineData;
-    chart.data.datasets[10].label = 'GFD (Observed)';
+    chart.data.datasets[10].label = 'GFD Sigma';
     chart.data.datasets[10].borderColor = '#ff44dd';
     chart.data.datasets[10].backgroundColor = 'transparent';
     chart.data.datasets[10].borderDash = [];
     chart.data.datasets[10].borderWidth = 2.5;
     chart.data.datasets[10].cubicInterpolationMode = 'monotone';
     chart.data.datasets[10].tension = 0.4;
-    chart.data.datasets[10].hidden = true;  // Spline curve not shown; only GFD (Observed) accel line (dataset 11)
+    chart.data.datasets[10].hidden = true;  // Spline curve not shown; only GFD (Velocity) line (dataset 11)
 
-    // Dataset 11: GFD (Observed), purple solid
-    var accelSource = (photometricResult && photometricResult.chart) || sandboxResult.chart;
-    var accelVels = accelSource.gfd_accel || [];
-    var accelRadii = accelSource.radii || [];
-    var accelData = [];
-    for (var i = 0; i < accelRadii.length; i++) {
-        if (accelRadii[i] > xMax) break;
-        if (accelVels[i] !== undefined) {
-            accelData.push({ x: accelRadii[i], y: accelVels[i] });
+    // Dataset 11: GFD (Velocity) - smoothed observed curve from rotation service (same as vortex)
+    var velSource = (photometricResult && photometricResult.chart) || sandboxResult.chart;
+    var gfdVelVels = velSource.gfd_velocity || [];
+    var velRadii = velSource.radii || [];
+    var velData = [];
+    for (var i = 0; i < velRadii.length; i++) {
+        if (velRadii[i] > xMax) break;
+        if (gfdVelVels[i] !== undefined) {
+            velData.push({ x: velRadii[i], y: gfdVelVels[i] });
         }
     }
-    chart.data.datasets[11].data = accelData;
-    chart.data.datasets[11].label = 'GFD (Observed)';
+    chart.data.datasets[11].data = velData;
+    chart.data.datasets[11].label = 'GFD (Velocity)';
     chart.data.datasets[11].borderColor = '#aa44ff';
     chart.data.datasets[11].backgroundColor = 'transparent';
     chart.data.datasets[11].borderDash = [];
@@ -1861,7 +1854,32 @@ function renderSandboxCurves() {
     chart.data.datasets[11].tension = 0.4;
     chart.data.datasets[11].hidden = !isAutoFitted;
 
-    // Clear envelope/band and legacy theory curves; keep Newton/MOND/CDM (0,2,7) for chip toggles
+    // Newton/MOND/CDM from unified photometric chart when present
+    var newtonianVels = sandboxResult.chart.newtonian_photometric || [];
+    var mondVels = sandboxResult.chart.mond_photometric || [];
+    var cdmVels = sandboxResult.chart.cdm_photometric || [];
+    if (newtonianVels.length === radii.length && mondVels.length === radii.length) {
+        var newtonianData = [];
+        var mondData = [];
+        var cdmData = [];
+        for (var i = 0; i < radii.length; i++) {
+            if (radii[i] > xMax) break;
+            if (newtonianVels[i] !== undefined) newtonianData.push({ x: radii[i], y: newtonianVels[i] });
+            if (mondVels[i] !== undefined) mondData.push({ x: radii[i], y: mondVels[i] });
+            if (cdmVels[i] !== undefined && cdmVels.length === radii.length) {
+                cdmData.push({ x: radii[i], y: cdmVels[i] });
+            }
+        }
+        chart.data.datasets[0].data = newtonianData;
+        chart.data.datasets[2].data = mondData;
+        chart.data.datasets[7].data = cdmData;
+        chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
+        chart.data.datasets[2].hidden = !isChipEnabled('mond');
+        chart.data.datasets[7].hidden = !isChipEnabled('cdm');
+        if (sandboxResult.cdm_halo) lastCdmHalo = sandboxResult.cdm_halo;
+    }
+
+    // Clear envelope/band and legacy theory curves
     chart.data.datasets[4].data = [];   // Envelope upper
     chart.data.datasets[5].data = [];   // Envelope lower
     chart.data.datasets[6].data = [];   // Auto fit markers
@@ -2197,10 +2215,10 @@ function getBandMethodInfo(method) {
  * This gives a +/- 6.2% physics-derived uncertainty envelope.
  */
 async function updateBand() {
-    // After auto-map, wrap the band around GFD (Observed) (dataset 9)
-    // since that is the primary answer curve. Otherwise use GFD base (dataset 1).
+    // In observation mode wrap the band around GFD (Velocity) (dataset 11);
+    // otherwise use GFD base (dataset 1).
     var gfdData = isAutoFitted
-        ? chart.data.datasets[9].data
+        ? chart.data.datasets[11].data
         : chart.data.datasets[1].data;
     if (!gfdData || gfdData.length === 0) {
         chart.data.datasets[4].data = [];
@@ -2245,9 +2263,9 @@ function updateBandLabel() {
  * Called when the lens slider changes or after chart data updates.
  */
 function updateLensBand() {
-    // After auto-map, wrap the band around GFD (Observed) (dataset 9)
+    // In observation mode wrap the band around GFD (Velocity) (dataset 11)
     var gfdData = isAutoFitted
-        ? chart.data.datasets[9].data
+        ? chart.data.datasets[11].data
         : chart.data.datasets[1].data;
     if (!gfdData || gfdData.length === 0) {
         chart.data.datasets[4].data = [];
@@ -3146,25 +3164,10 @@ function loadExample() {
             massModelManuallyModified = false;
             updateResetToPhotometricButton();
             fetchObservationData(example.id);
-            fetchRotationCurve(predMaxR, parseFloat(accelSlider.value), massModel, predObs, gr).then(function(data) {
-                var i;
-                var newtonianData = [];
-                var mondData = [];
-                var cdmData = [];
-                for (i = 0; i < (data.radii || []).length; i++) {
-                    newtonianData.push({ x: data.radii[i], y: data.newtonian[i] });
-                    mondData.push({ x: data.radii[i], y: data.mond[i] });
-                    if (data.cdm) cdmData.push({ x: data.radii[i], y: data.cdm[i] });
-                }
-                chart.data.datasets[0].data = newtonianData;
-                chart.data.datasets[2].data = mondData;
-                chart.data.datasets[7].data = cdmData;
-                chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
-                chart.data.datasets[2].hidden = !isChipEnabled('mond');
-                chart.data.datasets[7].hidden = !isChipEnabled('cdm');
-                if (data.cdm_halo) lastCdmHalo = data.cdm_halo;
-                chart.update('none');
-            }).catch(function() {});
+            // Theory curves (newtonian, mond, cdm) come from rotation photometric-curve
+            // and are applied in renderSandboxCurves; no separate fetchRotationCurve needed.
+            if (typeof updateCdmHaloPanel === 'function') updateCdmHaloPanel();
+            chart.update('none');
         });
     } else {
         chart.update('none');
@@ -3308,8 +3311,8 @@ function applyMassModelChartState() {
     var vpsPanel = document.getElementById('vps-panel');
     if (vpsPanel) vpsPanel.style.display = 'none';
     updateResetToPhotometricButton();
-    var accelChip = document.querySelector('.theory-chip[data-series="gfd_accel"]');
-    if (accelChip) accelChip.style.display = 'none';
+    var gfdVelChip = document.querySelector('.theory-chip[data-series="gfd_velocity"]');
+    if (gfdVelChip) gfdVelChip.style.display = 'none';
     if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
         chart.data.datasets[8].hidden = true;
         chart.data.datasets[10].hidden = true;
@@ -3324,8 +3327,8 @@ function applyMassModelChartState() {
  */
 async function applyObservationChartState() {
     isAutoFitted = true;
-    var accelChip = document.querySelector('.theory-chip[data-series="gfd_accel"]');
-    if (accelChip) accelChip.style.display = '';
+    var gfdVelChip = document.querySelector('.theory-chip[data-series="gfd_velocity"]');
+    if (gfdVelChip) gfdVelChip.style.display = '';
     var hasObsData = sandboxResult && sandboxResult.chart &&
         sandboxResult.chart.gfd_spline &&
         sandboxResult.chart.gfd_spline.length > 0;
@@ -3582,10 +3585,21 @@ function renderVortexCharts(figA, figB) {
     }
     var mondData = [];
     var cdmData = [];
-    if (lastVortexRotationData && lastVortexRotationData.radii && lastVortexRotationData.radii.length > 0) {
+    if (lastVortexPhotometricData && lastVortexPhotometricData.chart && lastVortexPhotometricData.chart.radii) {
+        var pr = lastVortexPhotometricData.chart.radii;
+        if (lastVortexPhotometricData.chart.mond_photometric && pr.length === lastVortexPhotometricData.chart.mond_photometric.length) {
+            mondData = seriesToPoints(pr, lastVortexPhotometricData.chart.mond_photometric);
+        }
+        if (lastVortexPhotometricData.chart.cdm_photometric && pr.length === lastVortexPhotometricData.chart.cdm_photometric.length) {
+            cdmData = seriesToPoints(pr, lastVortexPhotometricData.chart.cdm_photometric);
+        }
+    }
+    if (mondData.length === 0 && lastVortexRotationData && lastVortexRotationData.radii && lastVortexRotationData.radii.length > 0) {
         var rr = lastVortexRotationData.radii;
         if (lastVortexRotationData.mond) mondData = seriesToPoints(rr, lastVortexRotationData.mond);
-        if (lastVortexRotationData.cdm) cdmData = seriesToPoints(rr, lastVortexRotationData.cdm);
+    }
+    if (cdmData.length === 0 && lastVortexRotationData && lastVortexRotationData.radii && lastVortexRotationData.cdm) {
+        cdmData = seriesToPoints(lastVortexRotationData.radii, lastVortexRotationData.cdm);
     }
     if (mondData.length === 0 && chart && chart.data && chart.data.datasets[2] && chart.data.datasets[2].data) {
         mondData = mirrorCurveForVortex(chart.data.datasets[2].data);
@@ -3821,7 +3835,7 @@ function chartDataToJSON() {
         });
     }
     var seriesIndices = [0, 1, 2, 3, 7, 11];
-    var seriesKeys = ['newtonian', 'gfd_photometric', 'mond', 'observed', 'cdm', 'gfd_observed'];
+    var seriesKeys = ['newtonian', 'gfd_photometric', 'mond', 'observed', 'cdm', 'gfd_velocity'];
     if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
         for (var s = 0; s < seriesIndices.length; s++) {
             var idx = seriesIndices[s];
@@ -3994,7 +4008,7 @@ function renderChartDataTab() {
         { idx: 0, id: 'newtonian', filename: 'newtonian.csv' },
         { idx: 2, id: 'mond', filename: 'mond.csv' },
         { idx: 7, id: 'cdm', filename: 'cdm.csv' },
-        { idx: 11, id: 'gfd-observed', filename: 'gfd_observed.csv' }
+        { idx: 11, id: 'gfd-velocity', filename: 'gfd_velocity.csv' }
     ];
     if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
         for (var sc = 0; sc < seriesConfig.length; sc++) {
@@ -4880,7 +4894,7 @@ var theoryDatasetMap = {
     'gfd':           [1],       // GFD (Photometric)
     'gfd_sigma_old': [8],       // Legacy Bayesian GFD Sigma (hidden)
     'gfd_spline':    [10],      // GFD Sigma (fast observation fit)
-    'gfd_accel':     [11],      // GFD (with acceleration) -- 7-param fit
+    'gfd_velocity':  [11],      // GFD (Velocity) - smoothed observed curve from rotation service
     'gfd_symmetric': [9],       // Legacy GFD (Observed) - hidden
     'mond':          [2],       // Classical MOND
     'cdm':           [7]        // CDM + NFW
@@ -5144,6 +5158,202 @@ function dismissSplash() {
     }, remaining);
 }
 
+// ---------------------------------------------------------------------------
+// SPARC Import Overlay
+// ---------------------------------------------------------------------------
+function initSparcImportOverlay() {
+    var overlay = document.getElementById('sparc-import-overlay');
+    var openBtn = document.getElementById('add-from-sparc-btn');
+    var closeBtn = document.getElementById('sparc-import-close');
+    var closeBtn2 = document.getElementById('sparc-import-close-btn');
+    var searchInput = document.getElementById('sparc-search-input');
+    var listEl = document.getElementById('sparc-import-list');
+    var listWrap = document.querySelector('.sparc-import-list-wrap');
+    var loadingEl = document.getElementById('sparc-import-loading');
+    var emptyEl = document.getElementById('sparc-import-empty');
+    var importBtn = document.getElementById('sparc-import-btn');
+    var messageEl = document.getElementById('sparc-import-message');
+
+    var sparcCatalog = { galaxies: [], already_imported: [], importable_ids: [] };
+    var selectedId = null;
+    var focusableSelector = '.sparc-import-close, #sparc-search-input, .sparc-import-item, #sparc-import-btn, #sparc-import-close-btn';
+
+    function showMessage(text, isError, isProgress) {
+        messageEl.textContent = text;
+        messageEl.className = 'sparc-import-message ' +
+            (isProgress ? 'progress' : (isError ? 'error' : 'success'));
+        messageEl.style.display = 'block';
+    }
+    function hideMessage() {
+        messageEl.style.display = 'none';
+        messageEl.textContent = '';
+    }
+    function messageForError(body) {
+        var code = body && body.error_code;
+        if (code === 'not_found') {
+            return 'No SPARC data file for this galaxy. Only galaxies with pre-loaded data (e.g. ngc3198) can be imported by id; add others via file upload.';
+        }
+        if (code === 'parse_error') {
+            return 'Import failed: the data could not be parsed. Check the file format.';
+        }
+        if (code === 'save_failed' || code === 'invalid_id') {
+            return (body && body.error) ? body.error : 'Import failed.';
+        }
+        return (body && body.error) ? body.error : 'Import failed.';
+    }
+
+    function getAvailableGalaxies() {
+        var importedSet = {};
+        sparcCatalog.already_imported.forEach(function (id) { importedSet[id] = true; });
+        var importableSet = {};
+        (sparcCatalog.importable_ids || []).forEach(function (id) { importableSet[id] = true; });
+        return sparcCatalog.galaxies.filter(function (g) {
+            return importableSet[g.id] && !importedSet[g.id];
+        });
+    }
+
+    function filterGalaxies(query) {
+        var available = getAvailableGalaxies();
+        if (!query) return available;
+        var q = query.toLowerCase();
+        return available.filter(function (g) {
+            return g.id && g.id.toLowerCase().indexOf(q) >= 0;
+        });
+    }
+
+    function renderList(galaxies) {
+        listEl.innerHTML = '';
+        if (galaxies.length === 0) {
+            emptyEl.style.display = 'block';
+            emptyEl.textContent = searchInput.value.trim()
+                ? 'No galaxies match your search.'
+                : 'No galaxies available for import. Add SPARC data files to enable import by id.';
+            listEl.style.display = 'none';
+            return;
+        }
+        emptyEl.style.display = 'none';
+        listEl.style.display = 'block';
+        galaxies.forEach(function (g) {
+            var li = document.createElement('li');
+            li.setAttribute('role', 'option');
+            li.setAttribute('aria-selected', g.id === selectedId ? 'true' : 'false');
+            li.className = 'sparc-import-item' + (g.id === selectedId ? ' selected' : '');
+            li.dataset.id = g.id;
+            li.setAttribute('tabindex', '0');
+            var idSpan = document.createElement('span');
+            idSpan.className = 'sparc-item-id';
+            idSpan.textContent = g.id;
+            li.appendChild(idSpan);
+            li.addEventListener('click', function () {
+                selectedId = g.id;
+                listEl.querySelectorAll('.sparc-import-item').forEach(function (item) {
+                    item.classList.toggle('selected', item.dataset.id === selectedId);
+                    item.setAttribute('aria-selected', item.dataset.id === selectedId ? 'true' : 'false');
+                });
+                importBtn.disabled = false;
+            });
+            listEl.appendChild(li);
+        });
+    }
+
+    function openOverlay() {
+        overlay.style.display = 'flex';
+        selectedId = null;
+        importBtn.disabled = true;
+        hideMessage();
+        searchInput.value = '';
+        loadingEl.style.display = 'block';
+        listEl.style.display = 'none';
+        emptyEl.style.display = 'none';
+        fetch('/api/sparc/catalog')
+            .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
+            .then(function (data) {
+                loadingEl.style.display = 'none';
+                sparcCatalog.galaxies = data.galaxies || [];
+                sparcCatalog.already_imported = data.already_imported || [];
+                sparcCatalog.importable_ids = data.importable_ids || [];
+                renderList(getAvailableGalaxies());
+            })
+            .catch(function () {
+                loadingEl.style.display = 'none';
+                showMessage('Catalog unavailable.', true);
+            });
+        searchInput.focus();
+    }
+
+    function closeOverlay() {
+        overlay.style.display = 'none';
+        if (openBtn) openBtn.focus();
+    }
+
+    function doImport() {
+        if (!selectedId) return;
+        importBtn.disabled = true;
+        if (listWrap) listWrap.setAttribute('aria-busy', 'true');
+        hideMessage();
+        showMessage('Downloading data...', false, true);
+        var progressTimer = setTimeout(function () {
+            showMessage('Processing data...', false, true);
+        }, 500);
+        fetch('/api/sparc/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ galaxy_id: selectedId })
+        })
+            .then(function (r) { return r.json().then(function (body) { return { ok: r.ok, status: r.status, body: body }; }); })
+            .then(function (res) {
+                clearTimeout(progressTimer);
+                if (res.ok) {
+                    if (listWrap) listWrap.removeAttribute('aria-busy');
+                    showMessage('Import successful. Galaxy has been added to your list.', false);
+                    fetchGalaxies().then(function (cat) {
+                        galaxyCatalog = cat;
+                        updateExamplesDropdown();
+                        var idx = (galaxyCatalog.prediction || []).findIndex(function (g) { return g.id === selectedId; });
+                        if (idx >= 0) {
+                            var dropdown = document.getElementById('examples-dropdown');
+                            if (dropdown) { dropdown.value = String(idx + 1); loadExample(); }
+                        }
+                    }).catch(function () { updateExamplesDropdown(); });
+                    setTimeout(closeOverlay, 1200);
+                } else {
+                    if (listWrap) listWrap.removeAttribute('aria-busy');
+                    showMessage(messageForError(res.body), true);
+                    importBtn.disabled = false;
+                }
+            })
+            .catch(function () {
+                clearTimeout(progressTimer);
+                if (listWrap) listWrap.removeAttribute('aria-busy');
+                showMessage('Import failed: network error. Try again.', true);
+                importBtn.disabled = false;
+            });
+    }
+
+    if (openBtn) openBtn.addEventListener('click', openOverlay);
+    if (closeBtn) closeBtn.addEventListener('click', closeOverlay);
+    if (closeBtn2) closeBtn2.addEventListener('click', closeOverlay);
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            renderList(filterGalaxies(searchInput.value.trim()));
+        });
+    }
+    if (importBtn) importBtn.addEventListener('click', doImport);
+
+    overlay.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); closeOverlay(); }
+        if (e.key === 'Tab') {
+            var focusable = overlay.querySelectorAll(focusableSelector);
+            var idx = Array.prototype.indexOf.call(focusable, document.activeElement);
+            if (e.shiftKey) {
+                if (idx <= 0) { e.preventDefault(); focusable[focusable.length - 1].focus(); }
+            } else {
+                if (idx === focusable.length - 1 || idx < 0) { e.preventDefault(); focusable[0].focus(); }
+            }
+        }
+    });
+}
+
 async function init() {
     await waitForLibraries();
 
@@ -5155,6 +5365,7 @@ async function init() {
     initObsFontControls();
     initTheoryToggles();
     initCrosshairReadout();
+    initSparcImportOverlay();
 
     try {
         galaxyCatalog = await fetchGalaxies();

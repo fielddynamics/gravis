@@ -6,20 +6,24 @@ analysis. This service wraps the existing GravisEngine pipeline and
 owns all rotation-specific API endpoints under /api/rotation/*.
 
 Endpoints:
+    POST /api/rotation/photometric-curve - unified photometric chart (one engine run, all theory curves)
     POST /api/rotation/curve           - compute rotation curves (prediction)
     POST /api/rotation/inference       - compute rotation curves (optimized)
     POST /api/rotation/infer-curve     - (legacy alias for /inference)
     POST /api/rotation/infer-mass      - single-point mass inference
     POST /api/rotation/infer-mass-model - infer scaled mass model
     POST /api/rotation/infer-mass-multi - multi-point inference
-    GET  /api/rotation/galaxies        - list galaxies
-    GET  /api/rotation/galaxies/<id>   - get single galaxy
+    GET  /api/rotation/galaxies        - list all galaxies (prediction + inference)
+    GET  /api/rotation/galaxy-ids      - list all galaxy ids we have (for exclusion lists)
+    GET  /api/rotation/galaxies/<id>   - get single galaxy by id
 
 IMPORTANT: No unicode characters allowed (Windows charmap constraint).
 """
 
 import math
 
+import numpy as np
+from scipy.interpolate import UnivariateSpline
 from flask import jsonify, request
 
 from physics.services import GravisService
@@ -35,10 +39,67 @@ from physics.nfw import (
     abundance_matching, fit_halo, concentration, r200_kpc,
 )
 from data.galaxies import get_all_galaxies, get_galaxy_by_id
+from physics.services.rotation.photometry import derive_mass_parameters_from_photometry
 from physics.services.rotation.vortex_bridge import (
     mirror_curve_with_cutoff,
     truncate_to_first_obs,
 )
+
+
+def _interp(radii, values, r):
+    """Linear interpolation: value at r from (radii, values). Returns None if out of range."""
+    if not radii or not values or len(radii) != len(values):
+        return None
+    if r <= radii[0]:
+        return float(values[0])
+    if r >= radii[-1]:
+        return float(values[-1])
+    for i in range(len(radii) - 1):
+        if radii[i] <= r <= radii[i + 1]:
+            t = (r - radii[i]) / (radii[i + 1] - radii[i])
+            return float(values[i] + t * (values[i + 1] - values[i]))
+    return None
+
+
+def _smooth_observed_velocity(obs_r, obs_v, target_radii, smoothing=0.0, variance_pct=0.0):
+    """Smooth observed (r, v) onto target_radii. Same logic as vortex GFD (Velocity).
+
+    If variance_pct > 0, applies fractional-variance smoothing (e.g. 6.2 for 6.2%):
+    s_param = (variance_pct/100) * sum((v - mean)^2). Returns list of velocities
+    at each target radius (extrapolate at ends).
+    """
+    if not obs_r or not obs_v or len(obs_r) != len(obs_v) or len(obs_r) < 2:
+        return []
+    obs_r = np.asarray(obs_r, dtype=float)
+    obs_v = np.asarray(obs_v, dtype=float)
+    order = np.argsort(obs_r)
+    r_sorted = obs_r[order]
+    v_sorted = obs_v[order]
+    r_min, r_max = float(r_sorted[0]), float(r_sorted[-1])
+    k = min(3, len(obs_r) - 1)
+    spl = UnivariateSpline(r_sorted, v_sorted, s=smoothing, k=k)
+    target = np.asarray(target_radii, dtype=float)
+    v_raw = np.zeros_like(target)
+    for i, r in enumerate(target):
+        r = float(r)
+        if r <= r_min:
+            v_raw[i] = v_sorted[0]
+        elif r >= r_max:
+            v_raw[i] = v_sorted[-1]
+        else:
+            v_raw[i] = float(spl(r))
+
+    if variance_pct <= 0:
+        return [round(float(v), 4) for v in v_raw]
+
+    frac = variance_pct / 100.0
+    v_mean = float(np.mean(v_raw))
+    s_param = float(frac * np.sum((v_raw - v_mean) ** 2))
+    n_pts = len(target)
+    k_fv = min(3, n_pts - 1) if n_pts >= 4 else min(2, n_pts - 1)
+    spl_fv = UnivariateSpline(target, v_raw, s=s_param, k=k_fv)
+    out = [round(float(spl_fv(r)), 4) for r in target]
+    return out
 
 
 class RotationService(GravisService):
@@ -344,9 +405,159 @@ class RotationService(GravisService):
 
         return response
 
+    def compute_photometric_chart(self, galaxy_id, num_points=500,
+                                 accel_ratio=1.0, max_radius=50.0, mode="default",
+                                 gfd_velocity_smoothing_pct=6.2):
+        """Unified photometric chart: one engine run, all four theory curves.
+
+        Resolves photometric mass from catalog via derive_mass_parameters_from_photometry,
+        runs GravisEngine once, returns radii and newtonian_photometric, gfd_photometric,
+        mond_photometric, cdm_photometric, gfd_velocity (smoothed observed at gfd_velocity_smoothing_pct).
+        No sandbox dependency for theory curves.
+        """
+        gal = get_galaxy_by_id(galaxy_id)
+        if not gal:
+            return None, {"error": "Galaxy not found: %s" % galaxy_id}, 404
+
+        mass_model = gal.get("mass_model", {})
+        if not mass_model:
+            return None, {"error": "Galaxy has no mass model"}, 400
+
+        a0_eff = constants.A0 * accel_ratio
+        photometry = {
+            "Mb": mass_model.get("bulge", {}).get("M", 0),
+            "ab": mass_model.get("bulge", {}).get("a", 0),
+            "Md": mass_model.get("disk", {}).get("M", 0),
+            "Rd": mass_model.get("disk", {}).get("Rd", 0),
+            "Mg": mass_model.get("gas", {}).get("M", 0),
+            "Rg": mass_model.get("gas", {}).get("Rd", 0),
+        }
+        photo_result = derive_mass_parameters_from_photometry(photometry, a0_eff)
+        if "error" in photo_result:
+            return None, {"error": photo_result["error"]}, 400
+
+        pm = photo_result["mass_model"]
+        observations = gal.get("observations", [])
+        m200, cdm_halo_info = self._cdm_halo(pm, observations, accel_ratio)
+
+        gr = gal.get("galactic_radius")
+        if gr is None:
+            gr = max_radius
+        gr = float(gr) if gr else max_radius
+        theoretical_ot = auto_vortex_strength(pm, gr) if gr else 0.0
+
+        engine_config = GravisConfig(
+            mass_model=pm,
+            max_radius=max_radius,
+            num_points=num_points,
+            accel_ratio=accel_ratio,
+            galactic_radius=gr,
+            vortex_strength=theoretical_ot,
+        )
+        engine = GravisEngine.rotation_curve(engine_config, m200=m200)
+        result = engine.run()
+
+        radii = [round(r, 6) for r in result.radii]
+        series_dict = {
+            "newtonian_photometric": [round(float(v), 4) for v in result.series("newtonian")],
+            "gfd_photometric": [round(float(v), 4) for v in result.series("gfd")],
+            "mond_photometric": [round(float(v), 4) for v in result.series("mond")],
+            "cdm_photometric": [round(float(v), 4) for v in result.series("cdm")],
+        }
+
+        r_first_obs = 0.0
+        if observations:
+            pos_r = [float(o.get("r", 0)) for o in observations if o.get("r") and float(o.get("r", 0)) > 0]
+            if pos_r:
+                r_first_obs = min(pos_r)
+
+        if mode == "vortex":
+            radii, series_dict = mirror_curve_with_cutoff(
+                radii, series_dict, r_first_obs, bridge_fv_percent=1.0)
+        elif r_first_obs > 0:
+            radii, series_dict = truncate_to_first_obs(
+                radii, series_dict, r_first_obs)
+
+        chart = {
+            "radii": radii,
+            "newtonian_photometric": series_dict.get("newtonian_photometric", []),
+            "gfd_photometric": series_dict.get("gfd_photometric", []),
+            "mond_photometric": series_dict.get("mond_photometric", []),
+            "cdm_photometric": series_dict.get("cdm_photometric", []),
+        }
+
+        obs_r = []
+        obs_v = []
+        for o in observations:
+            r = float(o.get("r", 0))
+            v = float(o.get("v", 0))
+            if r > 0 and v > 0:
+                obs_r.append(r)
+                obs_v.append(v)
+        if len(obs_r) >= 2:
+            chart["gfd_velocity"] = _smooth_observed_velocity(
+                obs_r, obs_v, radii, smoothing=0.0,
+                variance_pct=float(gfd_velocity_smoothing_pct))
+        else:
+            chart["gfd_velocity"] = []
+        n_obs = len(obs_r)
+        residuals = []
+        if n_obs > 0 and result.radii and result.series("gfd"):
+            r_list = list(result.radii)
+            gfd_list = list(result.series("gfd"))
+            for o in observations:
+                r = float(o.get("r", 0))
+                v = float(o.get("v", 0))
+                if r <= 0 or v <= 0:
+                    continue
+                vp = _interp(r_list, gfd_list, r)
+                if vp is None:
+                    continue
+                err = max(float(o.get("err", 5.0)), 1.0)
+                residuals.append({
+                    "r": r, "v_obs": v, "v_gfd": round(vp, 2),
+                    "delta": round(v - vp, 2), "err": err,
+                })
+
+        return {
+            "galaxy": gal.get("name", galaxy_id),
+            "chart": chart,
+            "photometric_mass_model": pm,
+            "photometric_M_total": photo_result["M_total"],
+            "field_geometry": photo_result["field_geometry"],
+            "sparc_r_hi_kpc": gal.get("galactic_radius", 0),
+            "cdm_halo": cdm_halo_info,
+            "residuals": residuals,
+            "n_obs": n_obs,
+        }, None, None
+
     def register_routes(self, bp):
         """Mount all rotation-specific API endpoints."""
         service = self
+
+        # -- Photometric chart (unified: all four theory curves from one engine run) --
+        @bp.route("/rotation/photometric-curve", methods=["POST"])
+        def rotation_photometric_curve():
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request body must be JSON"}), 400
+            galaxy_id = data.get("galaxy_id")
+            if not galaxy_id:
+                return jsonify({"error": "galaxy_id is required"}), 400
+            num_points = max(10, min(int(data.get("num_points", 500)), 500))
+            accel_ratio = float(data.get("accel_ratio", 1.0))
+            max_radius = float(data.get("max_radius", 50.0))
+            mode = (data.get("mode") or "default").strip().lower()
+            if mode not in ("default", "vortex"):
+                mode = "default"
+            gfd_velocity_smoothing_pct = float(data.get("gfd_velocity_smoothing_pct", 6.2))
+            result, err, status = service.compute_photometric_chart(
+                galaxy_id, num_points=num_points, accel_ratio=accel_ratio,
+                max_radius=max_radius, mode=mode,
+                gfd_velocity_smoothing_pct=gfd_velocity_smoothing_pct)
+            if err is not None:
+                return jsonify(err), status if status else 400
+            return jsonify(result)
 
         # -- Rotation curve computation --
         @bp.route("/rotation/curve", methods=["POST"])
@@ -664,10 +875,21 @@ class RotationService(GravisService):
             )
             return jsonify(result)
 
-        # -- Galaxy catalog --
+        # -- Galaxy catalog (data layer: data.galaxies; includes built-in + sparc/) --
         @bp.route("/rotation/galaxies", methods=["GET"])
         def rotation_list_galaxies():
             return jsonify(get_all_galaxies())
+
+        @bp.route("/rotation/galaxy-ids", methods=["GET"])
+        def rotation_list_galaxy_ids():
+            """Return all galaxy ids we have (built-in examples + sparc folder)."""
+            all_galaxies = get_all_galaxies()
+            ids = []
+            for mode in ("prediction", "inference"):
+                for g in all_galaxies.get(mode) or []:
+                    if isinstance(g, dict) and g.get("id"):
+                        ids.append(g["id"])
+            return jsonify({"ids": ids})
 
         @bp.route("/rotation/galaxies/<galaxy_id>", methods=["GET"])
         def rotation_get_galaxy(galaxy_id):

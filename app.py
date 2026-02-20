@@ -26,6 +26,7 @@ from physics.services.nuclear_decay import NuclearDecayService
 from physics.services.architecture import ArchitectureService
 from physics.services.sandbox import InferenceSandboxService
 from physics.services.vortex import VortexService
+from physics.services.sparc import SparcService
 
 
 def create_registry():
@@ -41,6 +42,7 @@ def create_registry():
     registry.register(NuclearDecayService())
     registry.register(ArchitectureService())
     registry.register(InferenceSandboxService())
+    registry.register(SparcService())
     return registry
 
 

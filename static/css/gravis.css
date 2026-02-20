@@ -1778,6 +1778,241 @@ input[type="range"]::-moz-range-thumb:hover {
     color: #1a1a2e;
 }
 
+.add-observation-btn + .add-observation-btn {
+    margin-top: 6px;
+}
+
+.add-other-observation-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* SPARC Import Overlay */
+.sparc-import-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.sparc-import-container {
+    background: #1a1a2e;
+    border: 1px solid #404040;
+    border-radius: 10px;
+    max-width: 480px;
+    width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.sparc-import-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 18px;
+    border-bottom: 1px solid #404040;
+}
+
+.sparc-import-header h2 {
+    margin: 0;
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #e8e8e8;
+}
+
+.sparc-import-close {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 1.5em;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+}
+
+.sparc-import-close:hover {
+    color: #fff;
+}
+
+.sparc-import-toolbar {
+    padding: 12px 18px;
+}
+
+.sparc-import-search {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 0.95em;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    background: #2a2a2a;
+    color: #e8e8e8;
+}
+
+.sparc-import-search:focus {
+    outline: none;
+    border-color: #4da6ff;
+}
+
+.sparc-import-list-label {
+    margin: 0 18px 6px;
+    font-size: 0.85em;
+    color: #888;
+}
+
+.sparc-import-list-wrap {
+    flex: 1;
+    min-height: 200px;
+    max-height: 320px;
+    overflow: auto;
+    padding: 0 18px 12px;
+}
+
+.sparc-import-loading {
+    padding: 24px;
+    text-align: center;
+    color: #888;
+}
+
+.sparc-import-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.sparc-import-list .sparc-import-item {
+    display: block;
+    width: 100%;
+    padding: 10px 12px;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #e8e8e8;
+    font-size: 0.95em;
+    cursor: pointer;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.sparc-import-list .sparc-import-item:hover {
+    background: #2a2a2e;
+}
+
+.sparc-import-list .sparc-import-item.selected {
+    background: #2a3a4a;
+    color: #4da6ff;
+}
+
+.sparc-import-list .sparc-import-item .sparc-item-id {
+    font-weight: 500;
+}
+
+.sparc-import-empty {
+    padding: 24px;
+    text-align: center;
+    color: #888;
+}
+
+.sparc-import-actions {
+    padding: 14px 18px;
+    border-top: 1px solid #404040;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.sparc-import-message {
+    width: 100%;
+    font-size: 0.9em;
+    padding: 8px 10px;
+    border-radius: 6px;
+}
+
+.sparc-import-message.error {
+    background: #3a2020;
+    color: #e88;
+    border: 1px solid #5a3030;
+}
+
+.sparc-import-message.success {
+    background: #1a2a1a;
+    color: #8e8;
+    border: 1px solid #2a4a2a;
+}
+
+.sparc-import-message.progress {
+    background: #2a2a35;
+    color: #aaa;
+    border: 1px solid #404050;
+}
+
+.sparc-import-message.progress::before {
+    content: '';
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 8px;
+    vertical-align: middle;
+    border: 2px solid #4da6ff;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: sparc-import-spin 0.7s linear infinite;
+}
+
+@keyframes sparc-import-spin {
+    to { transform: rotate(360deg); }
+}
+
+.sparc-import-btn {
+    padding: 9px 18px;
+    background: #4da6ff;
+    color: #1a1a2e;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.sparc-import-btn:hover:not(:disabled) {
+    background: #6bb5ff;
+}
+
+.sparc-import-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sparc-import-close-btn {
+    padding: 9px 14px;
+    background: transparent;
+    color: #888;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.sparc-import-close-btn:hover {
+    color: #e8e8e8;
+    border-color: #606060;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
 /* Mass Distribution Panel */
 .mass-model-section {
     margin-bottom: 14px;

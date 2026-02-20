@@ -1,0 +1,48 @@
+{
+  "id": "ugc7232",
+  "name": "UGC 7232",
+  "distance": 2.83,
+  "galactic_radius": 1.54,
+  "mass": 0.1177,
+  "accel": 1,
+  "mass_model": {
+    "bulge": {
+      "M": 0,
+      "a": 0.3
+    },
+    "disk": {
+      "M": 56500000,
+      "Rd": 0.29
+    },
+    "gas": {
+      "M": 61180000,
+      "Rd": 0.51
+    }
+  },
+  "observations": [
+    {
+      "r": 0.21,
+      "v": 16.4,
+      "err": 3.3
+    },
+    {
+      "r": 0.41,
+      "v": 26.2,
+      "err": 3.3
+    },
+    {
+      "r": 0.62,
+      "v": 35.2,
+      "err": 3.3
+    },
+    {
+      "r": 0.82,
+      "v": 44.0,
+      "err": 3.3
+    }
+  ],
+  "references": [
+    "SPARC VizieR J/AJ/152/157 (Lelli+2016)",
+    "Ref: Sw09,Sw02"
+  ]
+}
