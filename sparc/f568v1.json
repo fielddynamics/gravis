@@ -1,0 +1,118 @@
+{
+  "id": "f568v1",
+  "name": "F568-V1",
+  "distance": 80.6,
+  "galactic_radius": 90.54,
+  "mass": 9.4833,
+  "accel": 1.0,
+  "mass_model": {
+    "bulge": {
+      "M": 0.0,
+      "a": 0.1
+    },
+    "disk": {
+      "M": 1912500000.0,
+      "Rd": 3.0
+    },
+    "gas": {
+      "M": 1130500000.0,
+      "Rd": 36.216
+    }
+  },
+  "observations": [
+    {
+      "r": 0.39,
+      "v": 17.4,
+      "err": 30.4,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 1.18,
+      "v": 46.3,
+      "err": 37.1,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 1.95,
+      "v": 69.1,
+      "err": 13.1,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 2.74,
+      "v": 85.2,
+      "err": 6.2,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 3.53,
+      "v": 93.2,
+      "err": 6.2,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 4.3,
+      "v": 100.0,
+      "err": 12.4,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 5.09,
+      "v": 108.0,
+      "err": 6.2,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 5.87,
+      "v": 112.0,
+      "err": 6.2,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 6.4,
+      "v": 113.0,
+      "err": 24.9,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 7.44,
+      "v": 113.0,
+      "err": 15.5,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 8.21,
+      "v": 112.0,
+      "err": 13.1,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 9.0,
+      "v": 111.0,
+      "err": 26.4,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 9.72,
+      "v": 111.0,
+      "err": 19.4,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 11.79,
+      "v": 113.0,
+      "err": 12.5,
+      "src": "SPARC Lelli+2016"
+    },
+    {
+      "r": 17.63,
+      "v": 118.0,
+      "err": 14.6,
+      "src": "SPARC Lelli+2016"
+    }
+  ],
+  "references": [
+    "SPARC: Lelli+2016 AJ 152 157",
+    "8 112.3  15.8"
+  ]
+}

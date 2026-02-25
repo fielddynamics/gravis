@@ -34,6 +34,3 @@ docs/
 
 # Internal (repo-root internal directory)
 internal/
-
-# User-imported SPARC galaxies (optional: remove to commit imported data)
-sparc/*.json

@@ -3,9 +3,9 @@
  * Frontend JavaScript: fetches rotation curve data from Flask API,
  * renders charts with Chart.js.
  *
- * All physics computations happen server-side via /api/rotation/curve
- * and /api/rotation/infer-mass-model. The frontend handles only:
- *   - UI state management (sliders, dropdowns, mode toggle)
+ * All physics computations happen server-side via
+ * /api/rotation/charts/mass_model. The frontend handles only:
+ *   - UI state management (sliders, galaxy browser)
  *   - Chart rendering (Chart.js with error bar plugin)
  *   - API communication
  */
@@ -24,37 +24,24 @@ const THROAT_FRAC = 0.30;  // R_t / R_env emergent ratio (mirrors physics.consta
 // =====================================================================
 // STATE
 // =====================================================================
-let currentMode = 'prediction';
 let currentExample = null;
-let pinnedObservations = null;   // observations stay visible when sliders are tweaked
-let pinnedGalaxyLabel = null;    // galaxy name stays in chart title when pinned
-let pinnedGalaxyExample = null;  // full example ref for Data Sources card
+let pinnedObservations = null;
+let pinnedGalaxyLabel = null;
+let pinnedGalaxyExample = null;
 let isLoadingExample = false;
-let galaxyCatalog = { prediction: [], inference: [] };
-let isAutoFitted = false;        // true when in Observation mode (GFD derived from data)
+let galaxyCatalog = [];
+let galaxyDataCache = {};
+let isAutoFitted = false;
 let lastCdmHalo = null;
-let lastApiResponse = null;      // last API response from updateChart()
-let inferredFieldGeometry = null; // field geometry from topological prediction (after inference)
-let sandboxResult = null;        // cached response from sandbox API (photometric + sigma curves)
-let photometricResult = null;    // cached response from fast photometric API (includes spline)
-let massModelManuallyModified = false;  // true when user changed mass sliders from photometric (enables Reset, manual GFD)
+let massModelChartData = null;
+let massModelManuallyModified = false;
 
-/**
- * Get the galactic radius (gravitational horizon) from the slider.
- * Returns null only when no galaxy is loaded and slider is at 0.
- */
 function getGalacticRadius() {
     var val = parseFloat(galacticRadiusSlider.value);
     return (val && val > 0) ? val : null;
 }
-let lastMultiResult = null;     // cached multi-point inference result
-let lastModelTotal = 0;         // cached anchor model total mass
-let lastAccelRatio = 1.0;       // cached accel ratio for band recompute
-let lastMassModel = null;       // cached mass model for band recompute
 
 // Debounce timer for API calls
-let updateTimer = null;
-const DEBOUNCE_MS = 80;
 let manualGfdTimer = null;
 const MANUAL_GFD_DEBOUNCE_MS = 150;
 
@@ -74,9 +61,8 @@ const lensValue = document.getElementById('lens-value');
 const vortexStrengthSlider = document.getElementById('vortex-strength-slider');
 const vortexStrengthValue = document.getElementById('vortex-strength-value');
 const vortexAutoBtn = document.getElementById('vortex-auto-btn');
-let autoVortexStrength = null;  // last auto-calculated value from API
-let isAutoThroughput = true;    // when true, backend computes the value
-let inferenceNeeded = false;    // true only on initial galaxy load in inference mode
+let autoVortexStrength = null;
+let isAutoThroughput = true;
 const distanceValue = document.getElementById('distance-value');
 const massValue = document.getElementById('mass-value');
 const velocityValue = document.getElementById('velocity-value');
@@ -87,7 +73,6 @@ const inferredMassValue = document.getElementById('inferred-mass-value');
 const observedLegend = document.getElementById('observed-legend');
 const massLabel = document.getElementById('mass-label');
 
-// Mass model panel
 const massModelContent = document.getElementById('mass-model-content');
 const bulgeMassSlider = document.getElementById('bulge-mass-slider');
 const bulgeScaleSlider = document.getElementById('bulge-scale-slider');
@@ -176,45 +161,21 @@ function updateMassModelDisplays() {
     massSlider.value = logTotal;
 }
 
-// Update mass model display labels only (no side effects, for inference auto-scaling)
 function updateResetToPhotometricButton() {
     var btn = document.getElementById('reset-to-photometric-btn');
     if (!btn) return;
-    var inMassModelMode = !isAutoFitted;
-    btn.style.display = (massModelManuallyModified && inMassModelMode && currentExample && currentExample.id) ? '' : 'none';
+    btn.style.display = (massModelManuallyModified && currentExample && currentExample.id) ? '' : 'none';
 }
 
 function resetToPhotometric() {
-    if (!currentExample || !currentExample.id || !sandboxResult || !sandboxResult.photometric_mass_model) return;
-    setMassModelSliders(sandboxResult.photometric_mass_model);
+    var pm = massModelChartData && massModelChartData.photometric_mass_model;
+    if (!currentExample || !currentExample.id || !pm) return;
+    setMassModelSliders(pm);
     massModelManuallyModified = false;
     updateResetToPhotometricButton();
-    fetchPhotometricData(currentExample.id).then(function() {
-        var massModel = getMassModelFromSliders();
-        var predObs = pinnedObservations || [];
-        var predMaxR = parseFloat(distanceSlider.value);
-        if (predObs.length > 0) {
-            var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
-            predMaxR = Math.max(predMaxR, maxObsR * 1.15);
-        }
-        var gr = currentExample.galactic_radius ? parseFloat(currentExample.galactic_radius) : parseFloat(distanceSlider.value);
-        fetchRotationCurve(predMaxR, parseFloat(accelSlider.value), massModel, predObs, gr).then(function(data) {
-            var i, newtonianData = [], mondData = [], cdmData = [];
-            for (i = 0; i < (data.radii || []).length; i++) {
-                newtonianData.push({ x: data.radii[i], y: data.newtonian[i] });
-                mondData.push({ x: data.radii[i], y: data.mond[i] });
-                if (data.cdm) cdmData.push({ x: data.radii[i], y: data.cdm[i] });
-            }
-            chart.data.datasets[0].data = newtonianData;
-            chart.data.datasets[2].data = mondData;
-            chart.data.datasets[7].data = cdmData;
-            chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
-            chart.data.datasets[2].hidden = !isChipEnabled('mond');
-            chart.data.datasets[7].hidden = !isChipEnabled('cdm');
-            if (data.cdm_halo) lastCdmHalo = data.cdm_halo;
-            chart.update('none');
-        }).catch(function() {});
-    });
+    fetchMassModelChart(currentExample.id).then(function() {
+        applyMassModelChartFromApi(massModelChartData);
+    }).catch(function() {});
 }
 
 function updateMassModelDisplaysOnly() {
@@ -236,64 +197,54 @@ function updateMassModelDisplaysOnly() {
         totalCoeff.toFixed(2) + 'e' + totalExp + ' M_sun';
 }
 
-// Mass model slider listeners (always active)
-// In prediction mode: all sliders directly control the model
-// In inference mode: scale length sliders control shape, masses are auto-computed
+// =====================================================================
+// MASS MODEL SLIDER LISTENERS
+// =====================================================================
+
+function debouncedRefreshChart() {
+    clearTimeout(manualGfdTimer);
+    manualGfdTimer = setTimeout(function() {
+        var example = pinnedGalaxyExample || currentExample;
+        var galaxyId = example && example.id ? example.id : null;
+        if (!galaxyId) return;
+        if (massModelManuallyModified) {
+            fetchMassModelChartManual(galaxyId);
+        } else {
+            fetchMassModelChart(galaxyId).then(function() {
+                applyMassModelChartFromApi(massModelChartData);
+            }).catch(function() {});
+        }
+    }, MANUAL_GFD_DEBOUNCE_MS);
+}
+
 [bulgeMassSlider, bulgeScaleSlider, diskMassSlider, diskScaleSlider, gasMassSlider, gasScaleSlider].forEach(slider => {
     slider.addEventListener('input', () => {
         if (!isLoadingExample && currentExample && currentExample.id) {
             massModelManuallyModified = true;
             updateResetToPhotometricButton();
-            clearTimeout(manualGfdTimer);
-            manualGfdTimer = setTimeout(function() {
-                var mm = getMassModelFromSliders();
-                var maxR = parseFloat(distanceSlider.value);
-                if (pinnedObservations && pinnedObservations.length > 0) {
-                    var maxObsR = Math.max.apply(null, pinnedObservations.map(function(o) { return o.r; }));
-                    maxR = Math.max(maxR, maxObsR * 1.15);
-                }
-                fetchGfdFromMassModel(mm, maxR, parseFloat(accelSlider.value));
-            }, MANUAL_GFD_DEBOUNCE_MS);
-        }
-        if (isAutoFitted) {
-            navigateTo('charts', 'chart');
-            hideAutoMapDiagnostics();
+            debouncedRefreshChart();
         }
         updateMassModelDisplays();
-        debouncedUpdateChart();
     });
 });
 
-// Galactic radius slider listener: updates the display and triggers
-// chart recompute so the GFD-sigma structural term responds in real time.
 galacticRadiusSlider.addEventListener('input', () => {
     galacticRadiusValue.textContent = galacticRadiusSlider.value + ' kpc';
-    debouncedUpdateChart();
 });
 
-// Gravity Lens Throughput slider: controls the +/- band width around
-// the GFD curve. Default 6.2% from (4/pi)^(1/4) topological constraint.
 lensSlider.addEventListener('input', () => {
     var pct = parseFloat(lensSlider.value);
     lensValue.textContent = '+/- ' + pct.toFixed(1) + '%';
-    updateLensBand();
 });
 
-// Origin Throughput slider listener: modulates the GFD-sigma structural
-// correction via vortex reflection through the Field Origin.
 vortexStrengthSlider.addEventListener('input', () => {
     vortexStrengthValue.textContent = parseFloat(vortexStrengthSlider.value).toFixed(2);
-    // Mark as manual override
     isAutoThroughput = false;
     vortexAutoBtn.classList.remove('active');
-    debouncedUpdateChart();
 });
 
-// Auto button: switch back to auto mode (triggers re-fetch which
-// will run GA when observations are available)
 vortexAutoBtn.addEventListener('click', () => {
     isAutoThroughput = true;
-    inferenceNeeded = false;
     vortexAutoBtn.classList.add('active');
     if (autoVortexStrength !== null) {
         vortexStrengthSlider.value = autoVortexStrength;
@@ -301,15 +252,8 @@ vortexAutoBtn.addEventListener('click', () => {
     } else {
         vortexStrengthValue.textContent = 'auto';
     }
-    debouncedUpdateChart();
 });
 
-/**
- * Sync the Origin Throughput slider and mass displays from an API
- * response. When the two-stage GA ran, updates the throughput slider
- * with the fitted value and adjusts mass sliders to reflect the
- * GA-optimized mass scale.
- */
 function syncThroughputFromResponse(data) {
     if (data.auto_origin_throughput !== undefined) {
         autoVortexStrength = data.auto_origin_throughput;
@@ -327,7 +271,6 @@ function syncThroughputFromResponse(data) {
             vortexStrengthValue.textContent = label;
         }
     }
-    // When inference optimized the mass model, sync all sliders
     if (data.optimized_mass_model && isAutoThroughput) {
         var om = data.optimized_mass_model;
         if (om.bulge && om.bulge.M > 0) {
@@ -353,9 +296,12 @@ function syncThroughputFromResponse(data) {
 const errorBarPlugin = {
     id: 'errorBars',
     afterDatasetsDraw(chart) {
-        const dataset = chart.data.datasets[3];
+        var obsIdx = -1;
+        if (chart.canvas.id === 'gravityChart') obsIdx = 3;
+        else return;
+        const dataset = chart.data.datasets[obsIdx];
         if (!dataset || dataset.hidden || !dataset.data || dataset.data.length === 0) return;
-        const meta = chart.getDatasetMeta(3);
+        const meta = chart.getDatasetMeta(obsIdx);
         if (!meta || meta.hidden) return;
         const ctx = chart.ctx;
         ctx.save();
@@ -367,15 +313,17 @@ const errorBarPlugin = {
             const x = element.x;
             const yScale = chart.scales.y;
             const yCenter = yScale.getPixelForValue(point.y);
-            // Draw error whiskers if error is present
-            if (point.err) {
-                const yTop = yScale.getPixelForValue(point.y + point.err);
-                const yBottom = yScale.getPixelForValue(point.y - point.err);
+            var err = point.err;
+            if (err == null && chart.data.datasets[obsIdx].errorBars && chart.data.datasets[obsIdx].errorBars[index] != null) {
+                err = chart.data.datasets[obsIdx].errorBars[index];
+            }
+            if (err) {
+                const yTop = yScale.getPixelForValue(point.y + err);
+                const yBottom = yScale.getPixelForValue(point.y - err);
                 ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBottom); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(x - 4, yTop); ctx.lineTo(x + 4, yTop); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(x - 4, yBottom); ctx.lineTo(x + 4, yBottom); ctx.stroke();
             }
-            // Always draw a filled center dot so it is visible on top of curves
             ctx.fillStyle = '#FFC107';
             ctx.beginPath();
             ctx.arc(x, yCenter, 3, 0, 2 * Math.PI);
@@ -389,52 +337,11 @@ Chart.register(errorBarPlugin);
 // =====================================================================
 // FIELD ORIGIN BOUNDARY PLUGIN
 // =====================================================================
-// Draws a vertical dashed line at the throat radius R_t = 0.30 * R_env
-// to mark where the stellated field origin boundary ends.
 
 var fieldOriginBoundaryPlugin = {
     id: 'fieldOriginBoundary',
     afterDraw: function(chartInstance) {
-        return;  // R_t line hidden for now (off observational band graph)
-
-        var rThroat;
-        var label;
-        var fg = sandboxResult ? sandboxResult.field_geometry : null;
-        if (fg && fg.throat_radius_kpc != null) {
-            rThroat = fg.throat_radius_kpc;
-            label = 'R_t = ' + rThroat.toFixed(1) + ' kpc';
-        } else if (inferredFieldGeometry
-            && inferredFieldGeometry.throat_radius_kpc != null) {
-            rThroat = inferredFieldGeometry.throat_radius_kpc;
-            label = 'R_t = ' + rThroat.toFixed(1) + ' kpc';
-        } else {
-            var rEnv = getGalacticRadius();
-            if (!rEnv) return;
-            rThroat = THROAT_FRAC * rEnv;
-            label = 'R_t = ' + rThroat.toFixed(1) + ' kpc';
-        }
-
-        var xScale = chartInstance.scales.x;
-        var yAxis = chartInstance.scales.y;
-        if (!xScale || !yAxis) return;
-        if (rThroat < xScale.min || rThroat > xScale.max) return;
-
-        var xPixel = xScale.getPixelForValue(rThroat);
-        var ctx = chartInstance.ctx;
-        ctx.save();
-        ctx.beginPath();
-        ctx.setLineDash([6, 4]);
-        ctx.moveTo(xPixel, yAxis.top);
-        ctx.lineTo(xPixel, yAxis.bottom);
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = '#00ff88';
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = '#00ff88';
-        ctx.textAlign = 'center';
-        ctx.fillText(label, xPixel, yAxis.top - 6);
-        ctx.restore();
+        return;  // R_t line hidden for now
     }
 };
 Chart.register(fieldOriginBoundaryPlugin);
@@ -442,50 +349,11 @@ Chart.register(fieldOriginBoundaryPlugin);
 // =====================================================================
 // FIELD HORIZON PLUGIN
 // =====================================================================
-// Draws a vertical dashed line at R_env (the galactic radius / baryonic
-// horizon) in red to mark the full extent of the baryonic envelope.
 
 var fieldHorizonPlugin = {
     id: 'fieldHorizon',
     afterDraw: function(chartInstance) {
-        return;  // R_env line hidden for now (off chart in both mass model and observational)
-        var rEnv;
-        var label;
-        var fg = sandboxResult ? sandboxResult.field_geometry : null;
-        if (fg && fg.envelope_radius_kpc != null) {
-            rEnv = fg.envelope_radius_kpc;
-            label = 'R_env = ' + rEnv.toFixed(1) + ' kpc';
-        } else if (isAutoFitted && inferredFieldGeometry
-            && inferredFieldGeometry.envelope_radius_kpc != null) {
-            rEnv = inferredFieldGeometry.envelope_radius_kpc;
-            label = 'R_env = ' + rEnv.toFixed(1) + ' kpc';
-        } else {
-            rEnv = getGalacticRadius();
-            if (!rEnv) return;
-            label = 'R_env = ' + rEnv.toFixed(1) + ' kpc';
-        }
-
-        var xScale = chartInstance.scales.x;
-        var yAxis = chartInstance.scales.y;
-        if (!xScale || !yAxis) return;
-        if (rEnv < xScale.min || rEnv > xScale.max) return;
-
-        var xPixel = xScale.getPixelForValue(rEnv);
-        var ctx = chartInstance.ctx;
-        ctx.save();
-        ctx.beginPath();
-        ctx.setLineDash([6, 4]);
-        ctx.moveTo(xPixel, yAxis.top);
-        ctx.lineTo(xPixel, yAxis.bottom);
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = '#ff6688';
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = '#ff6688';
-        ctx.textAlign = 'center';
-        ctx.fillText(label, xPixel, yAxis.top - 6);
-        ctx.restore();
+        return;  // R_env line hidden for now
     }
 };
 Chart.register(fieldHorizonPlugin);
@@ -493,13 +361,11 @@ Chart.register(fieldHorizonPlugin);
 // =====================================================================
 // SPARC R_HI PLUGIN
 // =====================================================================
-// Draws a vertical dotted line at the SPARC catalog R_HI (galactic_radius)
-// to mark the observed HI extent from 21cm radio surveys.
 
 var sparcRhiPlugin = {
     id: 'sparcRhi',
     afterDraw: function(chartInstance) {
-        var rHi = sandboxResult ? sandboxResult.sparc_r_hi_kpc : null;
+        var rHi = massModelChartData ? massModelChartData.sparc_r_hi_kpc : null;
         if (!rHi || rHi <= 0) return;
 
         var xScale = chartInstance.scales.x;
@@ -530,48 +396,19 @@ Chart.register(sparcRhiPlugin);
 // =====================================================================
 // R_VIS BAND PLUGIN
 // =====================================================================
-// Draws a shaded vertical band showing the baryonic extent (90% to
-// 99.5% enclosed mass) from the sandbox field geometry.
 
 var rVisBandPlugin = {
     id: 'rVisBand',
     beforeDraw: function(chartInstance) {
-        return;  // Purple baryonic band hidden for now (off observational band graph)
-        var fg = sandboxResult ? sandboxResult.field_geometry : null;
-        if (!fg) return;
-        var r90 = fg.visible_radius_90_kpc || 0;
-        var r99 = fg.visible_radius_99_kpc || 0;
-        if (r90 <= 0 || r99 <= 0) return;
-
-        var xScale = chartInstance.scales.x;
-        var yAxis = chartInstance.scales.y;
-        if (!xScale || !yAxis) return;
-
-        var x1 = xScale.getPixelForValue(r90);
-        var x2 = xScale.getPixelForValue(r99);
-        if (x2 < xScale.left || x1 > xScale.right) return;
-        var left = Math.max(x1, xScale.left);
-        var right = Math.min(x2, xScale.right);
-
-        var ctx = chartInstance.ctx;
-        ctx.save();
-        ctx.fillStyle = 'rgba(170,136,255,0.12)';
-        ctx.fillRect(left, yAxis.top, right - left, yAxis.bottom - yAxis.top);
-        ctx.fillStyle = '#aa88ff';
-        ctx.font = '10px Inter, "Segoe UI", system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(
-            'Baryonic extent (' + r90.toFixed(0) + ' to ' + r99.toFixed(0) + ' kpc)',
-            (left + right) / 2,
-            yAxis.top - 6);
-        ctx.restore();
+        return;  // Purple baryonic band hidden for now
     }
 };
 Chart.register(rVisBandPlugin);
 
 // =====================================================================
+// TOOLTIP SYSTEM
+// =====================================================================
 
-// ---- External HTML tooltip handler ----
 function getOrCreateTooltipEl(chartInstance) {
     var el = document.getElementById('gravis-tooltip');
     if (!el) {
@@ -610,83 +447,6 @@ function ttMass(val) {
     return c.toFixed(2) + ' &times; 10<sup>' + e + '</sup> M<sub>\u2609</sub>';
 }
 
-function buildInferenceTooltip(dp) {
-    var m = dp.raw.meta;
-    var r = dp.parsed.x;
-    var gfdV = dp.parsed.y;
-    var html = '';
-
-    // Header
-    html += '<div style="padding:8px 12px 4px;font-size:13px;font-weight:700;color:#e0e0e0;">';
-    html += 'r = ' + r.toFixed(1) + ' kpc';
-    html += '</div>';
-    html += '<hr style="margin:0 12px;border:none;border-top:1px solid #444;">';
-
-    // Section: Velocity comparison
-    html += ttSection('Velocity Comparison');
-    html += '<table style="width:100%;padding:4px 12px 6px;border-spacing:0;">';
-    html += ttRow('<span style="color:#4da6ff;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s', '#4da6ff');
-    if (m.obs_v !== undefined) {
-        var errStr = (m.err && m.err > 0) ? ' \u00B1 ' + m.err : '';
-        html += ttRow('<span style="color:#ffa726;">\u25CF</span> Observed', m.obs_v.toFixed(1) + errStr + ' km/s', '#ffa726');
-    }
-    var newtonV = interpolateCurve(0, r);
-    var mondV = interpolateCurve(2, r);
-    var cdmV = interpolateCurve(7, r);
-    var gfdSymV2 = interpolateCurve(9, r);
-    if (gfdSymV2 !== null && chart.data.datasets[9].data.length > 0) {
-        html += ttRow('<span style="color:#00E5FF;">\u25CF</span> GFD (Observed)', gfdSymV2.toFixed(1) + ' km/s', '#00E5FF');
-    }
-    if (newtonV !== null) {
-        html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s', '#ef5350');
-    }
-    if (mondV !== null) {
-        html += ttRow('<span style="color:#ab47bc;">\u25CF</span> MOND', mondV.toFixed(1) + ' km/s', '#ab47bc');
-    }
-    if (cdmV !== null && chart.data.datasets[7].data.length > 0) {
-        html += ttRow('<span style="color:#ffffff;">\u25CF</span> CDM+NFW', cdmV.toFixed(1) + ' km/s', '#ffffff');
-    }
-    html += '</table>';
-
-    // Section: Residual
-    if (m.obs_v !== undefined) {
-        html += ttSection('Residual');
-        var delta_v = gfdV - m.obs_v;
-        var resStr = (delta_v >= 0 ? '+' : '') + delta_v.toFixed(1) + ' km/s';
-        html += '<div style="padding:4px 12px 6px;">';
-        html += '<span style="color:#e0e0e0;">GFD &minus; Obs: </span>';
-        html += '<span style="font-weight:600;color:#e0e0e0;">' + resStr + '</span>';
-        if (m.sigma_away !== null) {
-            var nSig = m.sigma_away.toFixed(1);
-            var sigColor = m.sigma_away < 1.0 ? '#4caf50'
-                         : m.sigma_away < 2.0 ? '#8bc34a'
-                         : m.sigma_away < 3.0 ? '#ffa726'
-                         : '#ef5350';
-            var sigLabel = m.sigma_away < 1.0 ? 'within 1\u03C3'
-                         : m.sigma_away < 2.0 ? 'within 2\u03C3'
-                         : m.sigma_away < 3.0 ? '2-3\u03C3'
-                         : '> 3\u03C3';
-            html += '<br><span style="font-size:11px;color:' + sigColor + ';font-weight:600;">'
-                + nSig + '\u03C3 &mdash; ' + sigLabel + '</span>';
-        }
-        html += '</div>';
-    }
-
-    // Section: Inferred Mass
-    html += ttSection('Inferred Mass');
-    html += '<table style="width:100%;padding:4px 12px 8px;border-spacing:0;">';
-    html += ttRow('From obs', ttMass(m.inferred_total), '#e0e0e0');
-    if (m.gfd_total && m.gfd_total > 0) {
-        html += ttRow('GFD predicts', ttMass(m.gfd_total), '#4da6ff');
-    }
-    var devColor = Math.abs(m.deviation) < 10 ? '#4caf50' : Math.abs(m.deviation) < 25 ? '#ffa726' : '#ef5350';
-    html += ttRow('Deviation', '<span style="color:' + devColor + ';">' + (m.deviation >= 0 ? '+' : '') + m.deviation.toFixed(1) + '%</span>', '#808080');
-    html += ttRow('Mass enclosed', (m.enclosed_frac * 100).toFixed(0) + '% of model', '#808080');
-    html += '</table>';
-
-    return html;
-}
-
 function buildCdmTooltip(dp) {
     if (!lastCdmHalo) return '';
     var html = '';
@@ -713,13 +473,11 @@ function buildObservedTooltip(dp) {
     var err = (dp.raw && dp.raw.err) ? dp.raw.err : 0;
     var html = '';
 
-    // Header
     html += '<div style="padding:8px 12px 4px;font-size:13px;font-weight:700;color:#e0e0e0;">';
     html += 'r = ' + r.toFixed(1) + ' kpc';
     html += '</div>';
     html += '<hr style="margin:0 12px;border:none;border-top:1px solid #444;">';
 
-    // Section 1: Velocity comparison (with deltas from observed)
     html += ttSection('Velocity Comparison');
     var errStr = (err > 0) ? ' \u00B1 ' + err : '';
 
@@ -727,8 +485,8 @@ function buildObservedTooltip(dp) {
     var newtonV = interpolateCurve(0, r);
     var mondV = interpolateCurve(2, r);
     var cdmV = interpolateCurve(7, r);
+    var topoV = interpolateCurve(13, r);
 
-    // Helper: format a delta value with color coding
     function fmtDelta(theoryV) {
         var d = theoryV - vObs;
         var pct = (d / vObs) * 100;
@@ -741,19 +499,17 @@ function buildObservedTooltip(dp) {
 
     html += '<table style="width:100%;padding:4px 12px 6px;border-spacing:0;">';
     html += ttRow('<span style="color:#ffa726;">\u25CF</span> Observed', vObs.toFixed(1) + errStr + ' km/s', '#ffa726');
-    if (gfdV !== null)    html += ttRow('<span style="color:#4da6ff;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s' + fmtDelta(gfdV), '#4da6ff');
-    var gfdSymV = interpolateCurve(9, r);
-    if (gfdSymV !== null && chart.data.datasets[9].data.length > 0) {
-        html += ttRow('<span style="color:#00E5FF;">\u25CF</span> GFD (Observed)', gfdSymV.toFixed(1) + ' km/s' + fmtDelta(gfdSymV), '#00E5FF');
-    }
+    if (gfdV !== null)    html += ttRow('<span style="color:#00E5A0;">\u25CF</span> GFD', gfdV.toFixed(1) + ' km/s' + fmtDelta(gfdV), '#00E5A0');
     if (newtonV !== null) html += ttRow('<span style="color:#ef5350;">\u25CF</span> Newton', newtonV.toFixed(1) + ' km/s' + fmtDelta(newtonV), '#ef5350');
     if (mondV !== null)   html += ttRow('<span style="color:#ab47bc;">\u25CF</span> MOND', mondV.toFixed(1) + ' km/s' + fmtDelta(mondV), '#ab47bc');
     if (cdmV !== null && chart.data.datasets[7].data.length > 0) {
         html += ttRow('<span style="color:#ffffff;">\u25CF</span> CDM+NFW', cdmV.toFixed(1) + ' km/s' + fmtDelta(cdmV), '#ffffff');
     }
+    if (topoV !== null && chart.data.datasets[13].data.length > 0) {
+        html += ttRow('<span style="color:#FF6D00;">\u25CF</span> GFD Topo', topoV.toFixed(1) + ' km/s' + fmtDelta(topoV), '#FF6D00');
+    }
     html += '</table>';
 
-    // Section 2: GFD Agreement (sigma detail)
     if (gfdV !== null && err > 0) {
         var delta = gfdV - vObs;
         var sigAway = Math.abs(delta) / err;
@@ -767,15 +523,13 @@ function buildObservedTooltip(dp) {
                      : '> 3\u03C3';
         html += ttSection('GFD Agreement');
         html += '<div style="padding:4px 12px 6px;">';
-        html += '<span style="color:#e0e0e0;">GFD &minus; Obs: </span>';
+        html += '<span style="color:#e0e0e0;">GFD - Obs: </span>';
         html += '<span style="font-weight:600;color:#e0e0e0;">' + (delta >= 0 ? '+' : '') + delta.toFixed(1) + ' km/s</span>';
         html += '<br><span style="font-size:11px;color:' + sigColor + ';font-weight:600;">'
-            + sigAway.toFixed(1) + '\u03C3 &mdash; ' + sigLabel + '</span>';
+            + sigAway.toFixed(1) + '\u03C3, ' + sigLabel + '</span>';
         html += '</div>';
     }
 
-    // Section 4: Acceleration regime
-    // g_eff = v^2 / r, x = g_eff / a0
     var v_ms = vObs * 1000;
     var r_m = r * PHYS.KPC_TO_M;
     if (r_m > 0) {
@@ -800,7 +554,6 @@ function buildObservedTooltip(dp) {
         html += '</div>';
     }
 
-    // Section 5: Mass discrepancy (how much mass Newton needs vs baryonic model)
     if (newtonV !== null && newtonV > 0) {
         var massRatio = (vObs * vObs) / (newtonV * newtonV);
         html += ttSection('Mass Discrepancy');
@@ -836,7 +589,6 @@ function externalTooltipHandler(tooltipContext) {
     var tooltip = tooltipContext.tooltip;
     var el = getOrCreateTooltipEl(tooltipContext.chart);
 
-    // Hide if no tooltip
     if (tooltip.opacity === 0) {
         el.style.opacity = '0';
         return;
@@ -845,17 +597,13 @@ function externalTooltipHandler(tooltipContext) {
     var dp = tooltip.dataPoints && tooltip.dataPoints[0];
     if (!dp) { el.style.opacity = '0'; return; }
 
-    // Suppress for confidence band datasets
     if (dp.datasetIndex === 4 || dp.datasetIndex === 5) {
         el.style.opacity = '0';
         return;
     }
 
-    // Build HTML based on dataset
     var html = '';
-    if (dp.datasetIndex === 6 && dp.raw && dp.raw.meta) {
-        html = buildInferenceTooltip(dp);
-    } else if (dp.datasetIndex === 3) {
+    if (dp.datasetIndex === 3) {
         html = buildObservedTooltip(dp);
     } else if (dp.datasetIndex === 7 && lastCdmHalo) {
         html = buildCdmTooltip(dp);
@@ -865,17 +613,14 @@ function externalTooltipHandler(tooltipContext) {
 
     el.innerHTML = html;
 
-    // Position: offset from caret, clamped to viewport
     var chartRect = tooltipContext.chart.canvas.getBoundingClientRect();
     var left = chartRect.left + window.scrollX + tooltip.caretX + 14;
     var top = chartRect.top + window.scrollY + tooltip.caretY - 20;
 
-    // Clamp right edge
     var elWidth = el.offsetWidth || 280;
     if (left + elWidth > window.innerWidth - 10) {
         left = chartRect.left + window.scrollX + tooltip.caretX - elWidth - 14;
     }
-    // Clamp bottom edge
     var elHeight = el.offsetHeight || 200;
     if (top + elHeight > window.innerHeight + window.scrollY - 10) {
         top = window.innerHeight + window.scrollY - elHeight - 10;
@@ -887,7 +632,10 @@ function externalTooltipHandler(tooltipContext) {
     el.style.opacity = '1';
 }
 
-// Vertical crosshair line plugin: draws a thin line at the mouse x position
+// =====================================================================
+// CROSSHAIR LINE PLUGIN
+// =====================================================================
+
 var crosshairLinePlugin = {
     id: 'crosshairLine',
     afterDraw: function(chartInstance) {
@@ -906,6 +654,12 @@ var crosshairLinePlugin = {
     }
 };
 
+// =====================================================================
+// CHART CREATION
+// =====================================================================
+
+var CHART_Y_AXIS_LEFT_WIDTH = 80;
+
 const ctx = document.getElementById('gravityChart').getContext('2d');
 const chart = new Chart(ctx, {
     type: 'line',
@@ -913,7 +667,7 @@ const chart = new Chart(ctx, {
         labels: [],
         datasets: [
             {
-                label: 'Newtonian Gravity',
+                label: 'Newtonian',
                 data: [],
                 borderColor: '#ff6b6b',
                 backgroundColor: 'rgba(255, 107, 107, 0.1)',
@@ -923,16 +677,17 @@ const chart = new Chart(ctx, {
                 hidden: true
             },
             {
-                label: 'Gravity Field Dynamics (Dual Tetrad)',
+                label: 'GFD (Photometric)',
                 data: [],
-                borderColor: '#4da6ff',
-                backgroundColor: 'rgba(77, 166, 255, 0.1)',
+                borderColor: '#00E5A0',
+                backgroundColor: 'rgba(0, 229, 160, 0.1)',
+                borderDash: [8, 4],
                 borderWidth: 2.5,
                 tension: 0.4,
                 pointRadius: 0
             },
             {
-                label: 'Classical MOND (Empirical)',
+                label: 'MOND',
                 data: [],
                 borderColor: '#9966ff',
                 backgroundColor: 'rgba(153, 102, 255, 0.1)',
@@ -951,7 +706,7 @@ const chart = new Chart(ctx, {
                 pointStyle: 'line',
                 showLine: false
             },
-            // Dataset 4: GFD/GFD-sigma envelope upper edge (hidden from legend)
+            // Dataset 4: GFD envelope upper edge (hidden from legend)
             {
                 label: 'GFD envelope upper',
                 data: [],
@@ -963,7 +718,7 @@ const chart = new Chart(ctx, {
                 pointRadius: 0,
                 fill: {target: 5, above: 'rgba(77, 166, 255, 0.08)', below: 'rgba(77, 166, 255, 0.08)'}
             },
-            // Dataset 5: GFD/GFD-sigma envelope lower edge (hidden from legend)
+            // Dataset 5: GFD envelope lower edge (hidden from legend)
             {
                 label: 'GFD envelope lower',
                 data: [],
@@ -975,7 +730,7 @@ const chart = new Chart(ctx, {
                 pointRadius: 0,
                 fill: false
             },
-            // Dataset 6: Inference markers (green diamonds)
+            // Dataset 6: Inference markers (reserved)
             {
                 label: 'GFD Auto Fit',
                 data: [],
@@ -988,7 +743,7 @@ const chart = new Chart(ctx, {
             },
             // Dataset 7: CDM (baryonic + best-fit NFW halo)
             {
-                label: '\u039BCDM + NFW Halo (Best Fit)',
+                label: 'CDM',
                 data: [],
                 borderColor: '#ffffff',
                 backgroundColor: 'rgba(255, 255, 255, 0.05)',
@@ -998,7 +753,7 @@ const chart = new Chart(ctx, {
                 pointRadius: 0,
                 hidden: true
             },
-            // Dataset 8: GFD\u03C6 (covariant + gas-fraction-scaled structural release)
+            // Dataset 8: reserved
             {
                 label: 'GFD\u03C6',
                 data: [],
@@ -1008,8 +763,7 @@ const chart = new Chart(ctx, {
                 tension: 0.4,
                 pointRadius: 0
             },
-            // Dataset 9: GFD (Observed) -- GFD mapped to observations via Origin Throughput.
-            // Hidden by default; revealed only after auto-map completes.
+            // Dataset 9: reserved
             {
                 label: 'GFD (Observed)',
                 data: [],
@@ -1020,7 +774,7 @@ const chart = new Chart(ctx, {
                 pointRadius: 0,
                 hidden: true
             },
-            // Dataset 10: GFD (Observed) curve from observation fit
+            // Dataset 10: reserved
             {
                 label: 'GFD (Observed)',
                 data: [],
@@ -1032,9 +786,9 @@ const chart = new Chart(ctx, {
                 pointRadius: 0,
                 hidden: true
             },
-            // Dataset 11: GFD (Velocity) - smoothed observed curve (observations chart)
+            // Dataset 11: reserved (observations chart)
             {
-                label: 'GFD (Velocity)',
+                label: 'GFD (SST+Poisson photometric)',
                 data: [],
                 borderColor: '#aa44ff',
                 backgroundColor: 'transparent',
@@ -1043,7 +797,7 @@ const chart = new Chart(ctx, {
                 tension: 0.4,
                 pointRadius: 0
             },
-            // Dataset 12: GFD velocity decode (no mass input) - obs -> defraction -> field velocity
+            // Dataset 12: reserved
             {
                 label: 'GFD velocity decode (no mass input)',
                 data: [],
@@ -1051,6 +805,16 @@ const chart = new Chart(ctx, {
                 backgroundColor: 'transparent',
                 borderWidth: 2.2,
                 cubicInterpolationMode: 'monotone',
+                tension: 0.4,
+                pointRadius: 0
+            },
+            // Dataset 13: GFD Topological (signed Burgers vortex)
+            {
+                label: 'GFD (Topological)',
+                data: [],
+                borderColor: '#FF6D00',
+                backgroundColor: 'rgba(255, 109, 0, 0.08)',
+                borderWidth: 2.5,
                 tension: 0.4,
                 pointRadius: 0
             }
@@ -1064,12 +828,7 @@ const chart = new Chart(ctx, {
             padding: { top: 16 }
         },
         plugins: {
-            legend: {
-                // Legend replaced by the theory toggle bar above the chart.
-                // We keep it hidden but retain the filter so internal
-                // Chart.js operations that reference legend items still work.
-                display: false
-            },
+            legend: { display: false },
             title: {
                 display: true,
                 text: 'Rotation Curve: Gravitational Theory Comparison',
@@ -1090,7 +849,6 @@ const chart = new Chart(ctx, {
                     onPanComplete: ({chart: ch}) => {
                         const resetBtn = document.getElementById('reset-zoom-btn');
                         if (resetBtn) resetBtn.style.display = 'block';
-                        syncVpsXAxis();
                     }
                 },
                 zoom: {
@@ -1106,7 +864,6 @@ const chart = new Chart(ctx, {
                     onZoomComplete: ({chart: ch}) => {
                         const resetBtn = document.getElementById('reset-zoom-btn');
                         if (resetBtn) resetBtn.style.display = 'block';
-                        syncVpsXAxis();
                     }
                 },
                 limits: { x: {min: 0, max: 100} }
@@ -1140,10 +897,8 @@ const chart = new Chart(ctx, {
     }
 });
 
-// Register crosshair line plugin
 Chart.register(crosshairLinePlugin);
 
-// Track mouse position for the crosshair vertical line
 var gravityCanvas = document.getElementById('gravityChart');
 gravityCanvas.addEventListener('mousemove', function(e) {
     var rect = gravityCanvas.getBoundingClientRect();
@@ -1172,397 +927,25 @@ function hideResetButton() { resetZoomBtn.style.display = 'none'; }
 function resetChartZoom() { chart.resetZoom(); hideResetButton(); }
 
 resetZoomBtn.addEventListener('click', resetChartZoom);
-
-// Fixed y-axis width for consistent layout.
-var CHART_Y_AXIS_LEFT_WIDTH = 80;
-
-// VPS panel: mirror of main chart + histogram drawn as line vertical segments (like observation error bars).
-var vpsChart = null;
-var vortexChartAInstance = null;
-var vortexChartBInstance = null;
-var vortexCurrentVariance = 1.5;
-var lastVortexRotationData = null;
-var lastVortexPhotometricData = null;
-var lastVortexV2Data = null;
-
-function getVpsDeltaVData() {
-    var src = (photometricResult && photometricResult.chart) || (sandboxResult && sandboxResult.chart);
-    if (!src || !src.radii) return [];
-    var radii = src.radii;
-    var gfdVel = src.gfd_velocity || [];
-    var photo = src.gfd_photometric || [];
-    var out = [];
-    for (var i = 0; i < radii.length; i++) {
-        var v = gfdVel[i] != null ? gfdVel[i] : 0;
-        var p = photo[i] != null ? photo[i] : 0;
-        out.push({ x: radii[i], y: v - p });
-    }
-    return out;
-}
-
-function getVpsHistogramLineData() {
-    var points = getVpsDeltaVData();
-    var boost = [];
-    var suppress = [];
-    for (var i = 0; i < points.length; i++) {
-        if (i === 0) continue;
-        var r = points[i].x;
-        var y = points[i].y;
-        var seg = [{ x: r, y: 0 }, { x: r, y: y }, { x: r, y: 0 }];
-        if (y >= 0) {
-            boost.push(seg[0], seg[1], seg[2]);
-        } else {
-            suppress.push(seg[0], seg[1], seg[2]);
-        }
-    }
-    return { boost: boost, suppress: suppress };
-}
-
-function ensureVpsChart() {
-    if (vpsChart) return vpsChart;
-    var canvas = document.getElementById('vpsChart');
-    if (!canvas) return null;
-    var ctx = canvas.getContext('2d');
-    var datasets = [];
-    for (var i = 0; i < chart.data.datasets.length; i++) {
-        var d = chart.data.datasets[i];
-        datasets.push({
-            label: d.label,
-            data: [],
-            borderColor: d.borderColor,
-            backgroundColor: d.backgroundColor,
-            borderWidth: d.borderWidth,
-            tension: d.tension != null ? d.tension : 0.4,
-            pointRadius: d.pointRadius != null ? d.pointRadius : 0,
-            hidden: d.hidden,
-            borderDash: d.borderDash,
-            cubicInterpolationMode: d.cubicInterpolationMode,
-            showLine: d.showLine,
-            pointStyle: d.pointStyle,
-            fill: d.fill
-        });
-    }
-    datasets.push({
-        label: 'delta v (boost)',
-        data: [],
-        borderColor: 'rgba(0, 229, 160, 0.9)',
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        tension: 0,
-        pointRadius: 0,
-        fill: false
-    });
-    datasets.push({
-        label: 'delta v (suppress)',
-        data: [],
-        borderColor: 'rgba(255, 68, 221, 0.9)',
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        tension: 0,
-        pointRadius: 0,
-        fill: false
-    });
-    vpsChart = new Chart(ctx, {
-        type: 'line',
-        data: { labels: [], datasets: datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            layout: { padding: { top: 16 } },
-            plugins: {
-                legend: { display: false },
-                title: { display: false },
-                tooltip: { enabled: false },
-                zoom: { zoom: { enabled: false }, pan: { enabled: false } }
-            },
-            scales: {
-                x: {
-                    type: 'linear',
-                    title: { display: false },
-                    grid: { color: 'rgba(64, 64, 64, 0.3)' },
-                    ticks: { color: '#b0b0b0', maxTicksLimit: 10 }
-                },
-                y: {
-                    afterFit: function(scale) { scale.width = CHART_Y_AXIS_LEFT_WIDTH; },
-                    type: 'linear',
-                    title: {
-                        display: true,
-                        text: 'Circular Velocity v(r) [km/s]',
-                        color: '#b0b0b0',
-                        font: { size: 13, weight: '500' }
-                    },
-                    grid: { color: 'rgba(64, 64, 64, 0.3)' },
-                    ticks: { color: '#b0b0b0' },
-                    beginAtZero: true
-                }
-            }
-        }
-    });
-    return vpsChart;
-}
-
-function copyMainChartToVps() {
-    if (!vpsChart || !chart) return;
-    for (var i = 0; i < chart.data.datasets.length && i < vpsChart.data.datasets.length; i++) {
-        vpsChart.data.datasets[i].data = chart.data.datasets[i].data;
-        vpsChart.data.datasets[i].hidden = true;
-        vpsChart.data.datasets[i].label = chart.data.datasets[i].label;
-    }
-    var hist = getVpsHistogramLineData();
-    if (vpsChart.data.datasets[12]) vpsChart.data.datasets[12].data = hist.boost;
-    if (vpsChart.data.datasets[13]) vpsChart.data.datasets[13].data = hist.suppress;
-    if (chart.options.scales && chart.options.scales.x) {
-        vpsChart.options.scales.x.min = chart.options.scales.x.min;
-        vpsChart.options.scales.x.max = chart.options.scales.x.max;
-    }
-    var points = getVpsDeltaVData();
-    var maxAbs = 1;
-    for (var j = 0; j < points.length; j++) {
-        var ay = Math.abs(points[j].y);
-        if (ay > maxAbs) maxAbs = ay;
-    }
-    vpsChart.options.scales.y.min = -maxAbs;
-    vpsChart.options.scales.y.max = maxAbs;
-    vpsChart.options.scales.y.title.display = true;
-    vpsChart.options.scales.y.title.text = 'delta v (km/s)';
-    vpsChart.update('none');
-}
-
-function updateVpsChart() {
-    if (!isAutoFitted) return;
-    var panel = document.getElementById('vps-panel');
-    if (!panel || panel.style.display === 'none') return;
-    ensureVpsChart();
-    if (!vpsChart) return;
-    copyMainChartToVps();
-}
-
-function syncVpsXAxis() {
-    if (!vpsChart || !chart) return;
-    copyMainChartToVps();
-}
 canvas.addEventListener('dblclick', resetChartZoom);
-
-// =====================================================================
-// RIGHT PANEL: SCIENTIFIC METRICS (server-computed)
-// =====================================================================
-
-var lastApiMetrics = null;  // cached metrics from last API response
-
-/**
- * Update all right panel sections from server-provided metrics.
- * Falls back to '--' when no metrics are available.
- */
-function updateRightPanel(apiData) {
-    var m = (apiData && apiData.metrics) ? apiData.metrics : lastApiMetrics;
-    if (apiData && apiData.metrics) {
-        lastApiMetrics = apiData.metrics;
-    }
-
-    // --- Fit Quality ---
-    var fit = m ? m.fit_quality : null;
-    if (fit) {
-        document.getElementById('metric-rms').textContent = fit.rms_km_s + ' km/s';
-        var chi2El = document.getElementById('metric-chi2');
-        chi2El.textContent = fit.chi2_reduced.toFixed(2);
-        chi2El.className = 'metrics-value' + (fit.chi2_reduced <= 1.5 ? ' good' : fit.chi2_reduced <= 3 ? ' warn' : ' bad');
-        document.getElementById('metric-hits-1s').textContent = fit.within_1sigma + '/' + fit.n_obs;
-        document.getElementById('metric-hits-2s').textContent = fit.within_2sigma + '/' + fit.n_obs;
-    } else {
-        document.getElementById('metric-rms').textContent = '--';
-        document.getElementById('metric-chi2').textContent = '--';
-        document.getElementById('metric-chi2').className = 'metrics-value';
-        document.getElementById('metric-hits-1s').textContent = '--';
-        document.getElementById('metric-hits-2s').textContent = '--';
-    }
-
-    // --- Observation Summary ---
-    var obs = m ? m.observation_summary : null;
-    if (obs) {
-        document.getElementById('metric-npoints').textContent = obs.n_points;
-        document.getElementById('metric-radial-range').textContent = obs.r_min_kpc.toFixed(1) + ' - ' + obs.r_max_kpc.toFixed(1) + ' kpc';
-        document.getElementById('metric-mean-err').textContent = obs.mean_error_km_s > 0 ? ('+/-' + obs.mean_error_km_s + ' km/s') : '--';
-    } else {
-        document.getElementById('metric-npoints').textContent = '--';
-        document.getElementById('metric-radial-range').textContent = '--';
-        document.getElementById('metric-mean-err').textContent = '--';
-    }
-
-    // --- Mass Model ---
-    var mm = m ? m.mass_model : null;
-    if (mm) {
-        var totalExp = Math.floor(Math.log10(mm.total_baryonic_M_sun));
-        var totalCoeff = mm.total_baryonic_M_sun / Math.pow(10, totalExp);
-        document.getElementById('metric-total-mass').textContent = totalCoeff.toFixed(2) + 'e' + totalExp + ' M_sun';
-        document.getElementById('metric-gas-frac').textContent = mm.gas_fraction_pct + '%';
-
-        // Use inference-predicted field geometry when available (observation mode)
-        var fg = inferredFieldGeometry;
-        if (isAutoFitted && fg && fg.throat_radius_kpc !== null) {
-            var rt = fg.throat_radius_kpc;
-            var re = fg.envelope_radius_kpc;
-            var rtCat = mm.field_origin_kpc;
-            var reCat = mm.field_horizon_kpc;
-            var rtDelta = rtCat > 0 ? ((rt - rtCat) / rtCat * 100).toFixed(1) : '0.0';
-            var reDelta = reCat > 0 ? ((re - reCat) / reCat * 100).toFixed(1) : '0.0';
-            document.getElementById('metric-field-origin').textContent =
-                rt.toFixed(1) + ' kpc (' + (rtDelta >= 0 ? '+' : '') + rtDelta + '%)';
-            document.getElementById('metric-field-horizon').textContent =
-                re.toFixed(1) + ' kpc (' + (reDelta >= 0 ? '+' : '') + reDelta + '%)';
-        } else {
-            document.getElementById('metric-field-origin').textContent = mm.field_origin_kpc + ' kpc';
-            document.getElementById('metric-field-horizon').textContent = mm.field_horizon_kpc + ' kpc';
-        }
-    } else {
-        document.getElementById('metric-total-mass').textContent = '--';
-        document.getElementById('metric-gas-frac').textContent = '--';
-        document.getElementById('metric-field-origin').textContent = '--';
-        document.getElementById('metric-field-horizon').textContent = '--';
-    }
-
-    // --- CDM Comparison ---
-    if (lastCdmHalo) {
-        var h = lastCdmHalo;
-        var m200Exp = Math.floor(Math.log10(h.m200));
-        var m200Coeff = h.m200 / Math.pow(10, m200Exp);
-        document.getElementById('metric-cdm-m200').textContent = m200Coeff.toFixed(2) + 'e' + m200Exp + ' M_sun';
-        document.getElementById('metric-cdm-c').textContent = h.c.toFixed(1);
-        document.getElementById('metric-cdm-r200').textContent = h.r200_kpc ? (h.r200_kpc.toFixed(1) + ' kpc') : '--';
-        document.getElementById('metric-cdm-method').textContent = h.method === 'chi-squared fit to observations'
-            ? 'Chi-sq fit' : 'Abundance matching';
-        document.getElementById('metric-cdm-params').textContent = (h.n_params_total || 2) + ' (NFW)';
-    } else {
-        document.getElementById('metric-cdm-m200').textContent = '--';
-        document.getElementById('metric-cdm-c').textContent = '--';
-        document.getElementById('metric-cdm-r200').textContent = '--';
-        document.getElementById('metric-cdm-method').textContent = '--';
-        document.getElementById('metric-cdm-params').textContent = '--';
-    }
-
-    // --- Residuals Table ---
-    var residuals = m ? m.residuals : [];
-    var tbody = document.getElementById('metrics-residuals-tbody');
-    if (tbody) {
-        var html = '';
-        for (var i = 0; i < residuals.length; i++) {
-            var row = residuals[i];
-            var cls = '';
-            if (row.sigma !== null) {
-                cls = row.sigma <= 1.0 ? 'sigma-good' : row.sigma <= 2.0 ? 'sigma-warn' : 'sigma-bad';
-            }
-            html += '<tr class="' + cls + '">'
-                + '<td>' + row.r_kpc.toFixed(1) + '</td>'
-                + '<td>' + row.v_obs.toFixed(1) + '</td>'
-                + '<td>' + row.v_gfd.toFixed(1) + '</td>'
-                + '<td>' + row.delta_v.toFixed(1) + '</td>'
-                + '<td>' + (row.sigma !== null ? row.sigma.toFixed(1) : '--') + '</td>'
-                + '</tr>';
-        }
-        tbody.innerHTML = html;
-    }
-}
-
-/**
- * Toggle a collapsible metrics section open/closed.
- */
-function toggleMetricsSection(headerEl) {
-    var section = headerEl.parentElement;
-    var body = headerEl.nextElementSibling;
-    var chevron = headerEl.querySelector('.metrics-chevron');
-    if (body.style.display === 'none') {
-        body.style.display = '';
-        chevron.innerHTML = '&#9660;';
-        section.classList.remove('collapsed');
-    } else {
-        body.style.display = 'none';
-        chevron.innerHTML = '&#9654;';
-        section.classList.add('collapsed');
-    }
-}
 
 // =====================================================================
 // API COMMUNICATION
 // =====================================================================
 
-function _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius, mode) {
-    var body = {
-        max_radius: maxRadius,
-        num_points: 100,
-        accel_ratio: accelRatio,
-        mass_model: massModel
-    };
-    if (observations) {
-        body.observations = observations;
-    }
-    if (galacticRadius) {
-        body.galactic_radius = galacticRadius;
-    }
-    if (mode === 'vortex' || mode === 'default') {
-        body.mode = mode;
-    }
-    // Origin Throughput: send explicit value when user has overridden.
-    if (!isAutoThroughput && vortexStrengthSlider) {
-        body.vortex_strength = parseFloat(vortexStrengthSlider.value);
-    }
-    return body;
-}
-
-async function fetchRotationCurve(maxRadius, accelRatio, massModel, observations, galacticRadius, mode) {
-    var body = _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius, mode);
-    const resp = await fetch('/api/rotation/curve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
+async function fetchGalaxyCatalog() {
+    const resp = await fetch('/api/rotation/galaxy-catalog');
     if (!resp.ok) throw new Error('API error: ' + resp.status);
     return resp.json();
 }
 
-async function fetchInferRotationCurve(maxRadius, accelRatio, massModel, observations, galacticRadius) {
-    var body = _buildCurveBody(maxRadius, accelRatio, massModel, observations, galacticRadius);
-    const resp = await fetch('/api/rotation/infer-curve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
-    if (!resp.ok) throw new Error('API error: ' + resp.status);
-    return resp.json();
-}
-
-async function fetchInferredMassModel(rKpc, vKmS, accelRatio, massModel) {
-    const resp = await fetch('/api/rotation/infer-mass-model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            r_kpc: rKpc,
-            v_km_s: vKmS,
-            accel_ratio: accelRatio,
-            mass_model: massModel
-        })
-    });
-    if (!resp.ok) throw new Error('API error: ' + resp.status);
-    return resp.json();
-}
-
-async function fetchGalaxies() {
-    const resp = await fetch('/api/rotation/galaxies');
-    if (!resp.ok) throw new Error('API error: ' + resp.status);
-    return resp.json();
-}
-
-async function fetchMultiPointInference(observations, accelRatio, massModel) {
-    const resp = await fetch('/api/rotation/infer-mass-multi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            observations: observations,
-            accel_ratio: accelRatio,
-            mass_model: massModel
-        })
-    });
-    if (!resp.ok) return null;
-    return resp.json();
+async function fetchGalaxyById(galaxyId) {
+    if (galaxyDataCache[galaxyId]) return galaxyDataCache[galaxyId];
+    const resp = await fetch('/api/rotation/galaxies/' + encodeURIComponent(galaxyId));
+    if (!resp.ok) throw new Error('Galaxy not found: ' + galaxyId);
+    const data = await resp.json();
+    galaxyDataCache[galaxyId] = data;
+    return data;
 }
 
 function showChartLoading() {
@@ -1575,367 +958,161 @@ function hideChartLoading() {
     if (overlay) overlay.style.display = 'none';
 }
 
-let observationFetchPromise = null;
-
-async function fetchPhotometricData(galaxyId, chartMode, maxRadius) {
-    try {
-        var maxR = (maxRadius != null && maxRadius > 0) ? maxRadius : 50;
-        var payload = {
-            galaxy_id: galaxyId,
-            num_points: 500,
-            max_radius: maxR,
-            mode: (chartMode === 'vortex' || chartMode === 'vortex_chart') ? 'vortex' : 'default'
-        };
-        const resp = await fetch('/api/rotation/photometric-curve', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (!resp.ok) {
-            if (chartMode === 'vortex' || chartMode === 'vortex_chart') return null;
-            sandboxResult = null;
-            photometricResult = null;
-            return;
-        }
-        var result = await resp.json();
-        if (chartMode === 'vortex' || chartMode === 'vortex_chart') {
-            return result;
-        }
-        sandboxResult = result;
-        sandboxResult.gfd_source = 'photometric';
-        photometricResult = sandboxResult;
-        renderSandboxCurves();
-        updatePhotometricPanel();
-        updateDiagnosticsPanel();
-        blankRightPaneMetrics();
-
-        // Prefetch observation curves (sigma + accel) in background
-        observationFetchPromise = fetchObservationData(galaxyId);
-    } catch (e) {
-        if (chartMode === 'vortex' || chartMode === 'vortex_chart') return null;
-        sandboxResult = null;
-        photometricResult = null;
-    }
-}
-
 /**
- * Fetch GFD and theory curves from manually set mass model (slider values).
- * Uses enterprise rotation/curve so all curves come from one engine run.
+ * Fetch chart data for Mass model tab. POST /api/rotation/charts/mass_model.
+ * Uses the galaxy's photometric mass model (no override).
  */
-async function fetchGfdFromMassModel(massModel, maxRadius, accelRatio) {
+async function fetchMassModelChart(galaxyId) {
+    if (!galaxyId) return null;
     try {
-        var gr = getGalacticRadius();
-        var data = await fetchRotationCurve(maxRadius, accelRatio, massModel, [], gr);
-        if (!data || !sandboxResult) return;
-        sandboxResult = {
-            chart: {
-                radii: data.radii || [],
-                gfd_photometric: data.dtg || [],
-                newtonian_photometric: data.newtonian || [],
-                mond_photometric: data.mond || [],
-                cdm_photometric: data.cdm || []
-            },
-            field_geometry: data.field_geometry || {},
-            sparc_r_hi_kpc: sandboxResult.sparc_r_hi_kpc,
-            photometric_mass_model: sandboxResult.photometric_mass_model,
-            cdm_halo: data.cdm_halo || null,
-            gfd_source: 'manual'
-        };
-        renderSandboxCurves();
-    } catch (e) {
-        console.error('Manual GFD fetch error:', e);
-    }
-}
-
-async function fetchObservationData(galaxyId) {
-    try {
-        const resp = await fetch('/api/sandbox/photometric', {
+        var maxR = parseFloat(distanceSlider.value) || 50;
+        var resp = await fetch('/api/rotation/charts/mass_model', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 galaxy_id: galaxyId,
                 num_points: 500,
-                mode: 'observations'
+                max_radius: maxR,
+                accel_ratio: parseFloat(accelSlider.value) || 1.0
+            })
+        });
+        if (!resp.ok) return null;
+        massModelChartData = await resp.json();
+        return massModelChartData;
+    } catch (e) {
+        massModelChartData = null;
+        return null;
+    }
+}
+
+/**
+ * Fetch chart data with slider-overridden mass model.
+ * POST /api/rotation/charts/mass_model with mass_model_override.
+ */
+async function fetchMassModelChartManual(galaxyId) {
+    if (!galaxyId) return;
+    var mm = getMassModelFromSliders();
+    var maxR = parseFloat(distanceSlider.value) || 50;
+    if (pinnedObservations && pinnedObservations.length > 0) {
+        var maxObsR = Math.max.apply(null, pinnedObservations.map(function(o) { return o.r; }));
+        maxR = Math.max(maxR, maxObsR * 1.15);
+    }
+    try {
+        var resp = await fetch('/api/rotation/charts/mass_model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                galaxy_id: galaxyId,
+                num_points: 500,
+                max_radius: maxR,
+                accel_ratio: parseFloat(accelSlider.value) || 1.0,
+                mass_model_override: mm
             })
         });
         if (!resp.ok) return;
-        var result = await resp.json();
-        if (!photometricResult || !photometricResult.chart) return;
-        if (result.chart && result.chart.gfd_spline) {
-            photometricResult.chart.gfd_spline = result.chart.gfd_spline;
-            photometricResult.chart.gfd_covariant_spline =
-                result.chart.gfd_covariant_spline;
-            photometricResult.chart.delta_v2_spline =
-                result.chart.delta_v2_spline;
-        }
-        if (result.chart && result.chart.gfd_accel) {
-            photometricResult.chart.gfd_accel = result.chart.gfd_accel;
-        }
-        if (result.vortex_signal_spline) {
-            photometricResult.vortex_signal_spline =
-                result.vortex_signal_spline;
-        }
-        if (result.accel_ratio_fitted != null) {
-            photometricResult.accel_ratio_fitted =
-                result.accel_ratio_fitted;
-        }
-        // Merge inference-only fields into sandboxResult; do not replace chart (theory curves stay from rotation).
-        if (result.rms != null) sandboxResult.rms = result.rms;
-        if (result.chi2_dof != null) sandboxResult.chi2_dof = result.chi2_dof;
-        if (result.n_obs != null) sandboxResult.n_obs = result.n_obs;
-        if (result.accel_rms != null) sandboxResult.accel_rms = result.accel_rms;
-        if (result.vortex_signal_spline) sandboxResult.vortex_signal_spline = result.vortex_signal_spline;
-        if (result.vortex_signal_accel) sandboxResult.vortex_signal_accel = result.vortex_signal_accel;
-        if (result.accel_ratio_fitted != null) sandboxResult.accel_ratio_fitted = result.accel_ratio_fitted;
-        if (result.vortex_signal) sandboxResult.vortex_signal = result.vortex_signal;
-        if (result.residuals) sandboxResult.residuals = result.residuals;
-        if (isAutoFitted) {
-            renderSandboxCurves();
-        } else {
-            updateObservationCurvesOnly();
-        }
-        updateDiagnosticsPanel();
+        massModelChartData = await resp.json();
+        applyMassModelChartFromApi(massModelChartData);
     } catch (e) {
-        console.error('Observation data fetch error:', e);
+        console.error('Manual mass model chart error:', e);
     }
 }
 
-// fetchSandboxData: DISABLED (slow Bayesian endpoint, 9-12s).
-// Replaced by fetchPhotometricData which includes fast GFD Sigma
-// and GFD (with acceleration) from the photometric endpoint.
-// Kept for reference; remove when no longer needed.
-//
-// async function fetchSandboxData(galaxyId) {
-//     try {
-//         const resp = await fetch('/api/sandbox/map_gfd_with_bayesian', {
-//             method: 'POST',
-//             headers: { 'Content-Type': 'application/json' },
-//             body: JSON.stringify({
-//                 galaxy_id: galaxyId,
-//                 num_points: 500
-//             })
-//         });
-//         if (!resp.ok) { return; }
-//         sandboxResult = await resp.json();
-//         renderSandboxCurves();
-//         updatePhotometricPanel();
-//         updateDiagnosticsPanel();
-//     } catch (e) {
-//         console.error('Sandbox fetch error:', e);
-//     }
-// }
-
 // =====================================================================
-// SANDBOX RENDERING: photometric + sigma curves from sandbox API
+// CHART RENDERING
 // =====================================================================
 
 /**
- * Update only the observation-derived curve data (GFD Sigma, GFD Accel)
- * without changing scales or sandboxResult. Used when observation data
- * arrives in the background while the user is in mass model mode, so the
- * chart does not rezoom or rescale.
+ * Apply mass model chart from API response. Sets theory curves,
+ * observations, axis bounds, and updates panels.
  */
-function updateObservationCurvesOnly() {
-    if (!photometricResult || !photometricResult.chart) return;
-    var xMax = chart.options.scales && chart.options.scales.x
-        ? chart.options.scales.x.max
-        : 100;
-    var splineSource = photometricResult.chart;
-    var splineRadii = splineSource.radii || [];
-    var splineVels = splineSource.gfd_spline || [];
-    var splineData = [];
-    for (var i = 0; i < splineRadii.length; i++) {
-        if (splineRadii[i] > xMax) break;
-        if (splineVels[i] !== undefined) {
-            splineData.push({ x: splineRadii[i], y: splineVels[i] });
-        }
+function applyMassModelChartFromApi(data) {
+    if (typeof chart === 'undefined' || !chart || !chart.data || !chart.data.datasets) return;
+    if (!data || !data.chart) {
+        chart.data.datasets[0].data = [];
+        chart.data.datasets[1].data = [];
+        chart.data.datasets[2].data = [];
+        chart.data.datasets[3].data = [];
+        chart.data.datasets[7].data = [];
+        chart.data.datasets[13].data = [];
+        chart.update('none');
+        return;
     }
-    chart.data.datasets[10].data = splineData;
-    chart.data.datasets[10].hidden = true;  // Never show spline line; GFD (Velocity) is dataset 11 only
-
-    var gfdVelVels = splineSource.gfd_velocity || [];
-    var velRadii = splineSource.radii || [];
-    var velData = [];
-    for (var j = 0; j < velRadii.length; j++) {
-        if (velRadii[j] > xMax) break;
-        if (gfdVelVels[j] !== undefined) {
-            velData.push({ x: velRadii[j], y: gfdVelVels[j] });
-        }
-    }
-    chart.data.datasets[11].data = velData;
-    chart.data.datasets[11].label = 'GFD (Velocity)';
-    chart.data.datasets[11].hidden = !isAutoFitted;
-
-    var decodeVelsOnly = splineSource.gfd_sst_velocity_decode || [];
-    var decodeDataOnly = [];
-    for (var k = 0; k < velRadii.length; k++) {
-        if (velRadii[k] > xMax) break;
-        if (decodeVelsOnly[k] !== undefined) decodeDataOnly.push({ x: velRadii[k], y: decodeVelsOnly[k] });
-    }
-    chart.data.datasets[12].data = decodeDataOnly;
-    chart.data.datasets[12].hidden = !isChipEnabled('gfd_sst_velocity_decode');
-
-    chart.update('none');
-}
-
-function renderSandboxCurves() {
-    if (!sandboxResult || !sandboxResult.chart) return;
-
-    var radii = sandboxResult.chart.radii || [];
-    var photoVels = sandboxResult.chart.gfd_photometric || [];
-    var covariantVels = sandboxResult.chart.gfd_covariant || [];
-    var fg = sandboxResult.field_geometry || {};
-
-    // Compute axis limits from sandbox data
-    var derivedRenv = fg.envelope_radius_kpc || 0;
-    var derivedRvis99 = fg.visible_radius_99_kpc || fg.visible_radius_kpc || 0;
-    var obsData = pinnedObservations || [];
-    var maxObsR = obsData.length > 0
-        ? Math.max(...obsData.map(function(o) { return o.r; })) : 0;
-    var sparcRhi = sandboxResult.sparc_r_hi_kpc || 0;
-    var xMax = Math.max(derivedRenv, derivedRvis99, maxObsR, sparcRhi) * 1.10;
-
-    var obsMax = obsData.length > 0
-        ? Math.max(...obsData.map(function(o) { return o.v; })) : 0;
-    var yMax = obsMax > 0 ? Math.ceil(obsMax * 1.2 / 10) * 10 : undefined;
-
-    // Build curve data, filtered to xMax
+    var c = data.chart;
+    var radii = c.radii || [];
+    var obsMass = (data.observations && data.observations.length) ? data.observations : (pinnedObservations || []);
+    var bounds = data.axis_bounds || {};
+    var xMax = bounds.x_max || 50;
+    var yMax = bounds.y_max || undefined;
+    var newtonianData = [];
     var photoData = [];
-    var sigmaData = [];
+    var mondData = [];
+    var cdmData = [];
+    var topoData = [];
     for (var i = 0; i < radii.length; i++) {
         if (radii[i] > xMax) break;
-        if (photoVels[i] !== undefined) {
-            photoData.push({ x: radii[i], y: photoVels[i] });
-        }
-        if (covariantVels[i] !== undefined) {
-            sigmaData.push({ x: radii[i], y: covariantVels[i] });
-        }
+        var r = radii[i];
+        if (c.newtonian_photometric && c.newtonian_photometric[i] !== undefined) newtonianData.push({ x: r, y: c.newtonian_photometric[i] });
+        if (c.gfd_photometric && c.gfd_photometric[i] !== undefined) photoData.push({ x: r, y: c.gfd_photometric[i] });
+        if (c.mond_photometric && c.mond_photometric[i] !== undefined) mondData.push({ x: r, y: c.mond_photometric[i] });
+        if (c.cdm_photometric && c.cdm_photometric.length === radii.length && c.cdm_photometric[i] !== undefined) cdmData.push({ x: r, y: c.cdm_photometric[i] });
+        if (c.gfd_topological && c.gfd_topological[i] !== undefined) topoData.push({ x: r, y: c.gfd_topological[i] });
     }
+    var observedData = obsMass.map(function(o) { return { x: o.r, y: o.v }; });
 
-    // Spline data uses photometricResult's own radii to avoid index mismatch
-    var splineData = [];
-    var splineSource = (photometricResult && photometricResult.chart) || sandboxResult.chart;
-    var splineRadii = splineSource.radii || [];
-    var splineVels = splineSource.gfd_spline || [];
-    for (var i = 0; i < splineRadii.length; i++) {
-        if (splineRadii[i] > xMax) break;
-        if (splineVels[i] !== undefined) {
-            splineData.push({ x: splineRadii[i], y: splineVels[i] });
-        }
-    }
+    var example = currentExample || pinnedGalaxyExample;
+    var galaxyLabel = example ? example.name.replace(/\s*\(.*\)/, '') : 'Galaxy';
+    chart.options.plugins.title.text = galaxyLabel + ' Rotation Curve';
 
-    // Dataset 1: GFD (Photometric) or GFD (Manual mass params), green dashed
-    var gfdLabel = (sandboxResult.gfd_source === 'manual')
-        ? 'GFD (Manual mass params)'
-        : 'GFD (Photometric)';
+    chart.data.datasets[0].data = newtonianData;
+    chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
     chart.data.datasets[1].data = photoData;
-    chart.data.datasets[1].label = gfdLabel;
-    var gfdChipLabel = document.getElementById('gfd-chip-label');
-    if (gfdChipLabel) gfdChipLabel.textContent = gfdLabel;
-    chart.data.datasets[1].borderColor = 'rgba(0, 229, 160, 0.7)';
-    chart.data.datasets[1].backgroundColor = 'transparent';
-    chart.data.datasets[1].borderDash = [8, 4];
-    chart.data.datasets[1].borderWidth = 2;
-    chart.data.datasets[1].cubicInterpolationMode = 'monotone';
-    chart.data.datasets[1].tension = 0.4;
+    chart.data.datasets[1].label = massModelManuallyModified ? 'GFD (Manual mass params)' : 'GFD (Photometric)';
+    chart.data.datasets[2].data = mondData;
+    chart.data.datasets[2].hidden = !isChipEnabled('mond');
+    chart.data.datasets[3].data = observedData;
+    chart.data.datasets[7].data = cdmData;
+    chart.data.datasets[7].hidden = !isChipEnabled('cdm');
+    chart.data.datasets[13].data = topoData;
+    chart.data.datasets[13].hidden = !isChipEnabled('gfd_topological');
 
-    // Dataset 8: old Bayesian GFD Sigma (disabled, kept for legacy)
+    // Clear unused datasets
+    chart.data.datasets[4].data = [];
+    chart.data.datasets[5].data = [];
+    chart.data.datasets[6].data = [];
     chart.data.datasets[8].data = [];
     chart.data.datasets[8].hidden = true;
+    chart.data.datasets[9].data = [];
+    chart.data.datasets[9].hidden = true;
+    chart.data.datasets[10].data = [];
+    chart.data.datasets[10].hidden = true;
+    chart.data.datasets[11].data = [];
+    chart.data.datasets[11].hidden = true;
+    chart.data.datasets[12].data = [];
+    chart.data.datasets[12].hidden = true;
 
-    // Dataset 10: GFD Sigma spline (hidden; observation fit)
-    chart.data.datasets[10].data = splineData;
-    chart.data.datasets[10].label = 'GFD Sigma';
-    chart.data.datasets[10].borderColor = '#ff44dd';
-    chart.data.datasets[10].backgroundColor = 'transparent';
-    chart.data.datasets[10].borderDash = [];
-    chart.data.datasets[10].borderWidth = 2.5;
-    chart.data.datasets[10].cubicInterpolationMode = 'monotone';
-    chart.data.datasets[10].tension = 0.4;
-    chart.data.datasets[10].hidden = true;  // Spline curve not shown; only GFD (Velocity) line (dataset 11)
-
-    // Dataset 11: GFD (Velocity) - smoothed observed curve from rotation service (same as vortex)
-    var velSource = (photometricResult && photometricResult.chart) || sandboxResult.chart;
-    var gfdVelVels = velSource.gfd_velocity || [];
-    var velRadii = velSource.radii || [];
-    var velData = [];
-    for (var i = 0; i < velRadii.length; i++) {
-        if (velRadii[i] > xMax) break;
-        if (gfdVelVels[i] !== undefined) {
-            velData.push({ x: velRadii[i], y: gfdVelVels[i] });
-        }
-    }
-    chart.data.datasets[11].data = velData;
-    chart.data.datasets[11].label = 'GFD (Velocity)';
-    chart.data.datasets[11].borderColor = '#aa44ff';
-    chart.data.datasets[11].backgroundColor = 'transparent';
-    chart.data.datasets[11].borderDash = [];
-    chart.data.datasets[11].borderWidth = 2.5;
-    chart.data.datasets[11].cubicInterpolationMode = 'monotone';
-    chart.data.datasets[11].tension = 0.4;
-    chart.data.datasets[11].hidden = !isAutoFitted;
-    // Dataset 12: GFD velocity decode (no mass input)
-    var decodeVels = velSource.gfd_sst_velocity_decode || [];
-    var decodeData = [];
-    for (var j = 0; j < velRadii.length; j++) {
-        if (velRadii[j] > xMax) break;
-        if (decodeVels[j] !== undefined) {
-            decodeData.push({ x: velRadii[j], y: decodeVels[j] });
-        }
-    }
-    chart.data.datasets[12].data = decodeData;
-    chart.data.datasets[12].label = 'GFD velocity decode (no mass input)';
-    chart.data.datasets[12].borderColor = '#1E88E5';
-    chart.data.datasets[12].hidden = !isChipEnabled('gfd_sst_velocity_decode');
-
-    // Newton/MOND/CDM from unified photometric chart when present
-    var newtonianVels = sandboxResult.chart.newtonian_photometric || [];
-    var mondVels = sandboxResult.chart.mond_photometric || [];
-    var cdmVels = sandboxResult.chart.cdm_photometric || [];
-    if (newtonianVels.length === radii.length && mondVels.length === radii.length) {
-        var newtonianData = [];
-        var mondData = [];
-        var cdmData = [];
-        for (var i = 0; i < radii.length; i++) {
-            if (radii[i] > xMax) break;
-            if (newtonianVels[i] !== undefined) newtonianData.push({ x: radii[i], y: newtonianVels[i] });
-            if (mondVels[i] !== undefined) mondData.push({ x: radii[i], y: mondVels[i] });
-            if (cdmVels[i] !== undefined && cdmVels.length === radii.length) {
-                cdmData.push({ x: radii[i], y: cdmVels[i] });
-            }
-        }
-        chart.data.datasets[0].data = newtonianData;
-        chart.data.datasets[2].data = mondData;
-        chart.data.datasets[7].data = cdmData;
-        chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
-        chart.data.datasets[2].hidden = !isChipEnabled('mond');
-        chart.data.datasets[7].hidden = !isChipEnabled('cdm');
-        if (sandboxResult.cdm_halo) lastCdmHalo = sandboxResult.cdm_halo;
-    }
-
-    // Clear envelope/band and legacy theory curves
-    chart.data.datasets[4].data = [];   // Envelope upper
-    chart.data.datasets[5].data = [];   // Envelope lower
-    chart.data.datasets[6].data = [];   // Auto fit markers
-    chart.data.datasets[9].data = [];   // GFD Observed
-
-    // Apply axis rules
-    chart.options.scales.x.min = 0;
+    chart.options.scales.x.min = bounds.x_min || 0;
     chart.options.scales.x.max = xMax;
-    chart.options.scales.y.min = 0;
+    chart.options.scales.y.min = bounds.y_min || 0;
     if (yMax) chart.options.scales.y.max = yMax;
 
-    // Store field geometry for plugins
-    chart.options.plugins.sandboxGeometry = fg;
+    // Update CDM halo
+    lastCdmHalo = data.cdm_halo || null;
+    updateCdmHaloPanel();
+
+    // Update GFD chip label
+    var gfdChipLabel = document.getElementById('gfd-chip-label');
+    if (gfdChipLabel) gfdChipLabel.textContent = chart.data.datasets[1].label;
+
+    // Update panels
+    updatePhotometricPanel();
+    updateFieldGeometryMetrics(data.field_geometry);
+    updateMetricsPanel();
 
     chart.update('none');
-
-    if (isAutoFitted) updateVpsChart();
 }
 
 function updatePhotometricPanel() {
-    if (!sandboxResult) return;
-    var pm = sandboxResult.photometric_mass_model;
+    var pm = massModelChartData && massModelChartData.photometric_mass_model;
     if (!pm) return;
 
     var gasMass = pm.gas ? pm.gas.M : 0;
@@ -1946,7 +1123,6 @@ function updatePhotometricPanel() {
     var bulgeScale = pm.bulge ? pm.bulge.a : 0;
     var totalMass = gasMass + diskMass + bulgeMass;
 
-    // Update display values (Mass Model panel)
     document.getElementById('gas-mass-value').textContent = gasMass.toExponential(1) + ' M_sun';
     document.getElementById('gas-scale-value').textContent = gasScale.toFixed(1) + ' kpc';
     document.getElementById('disk-mass-value').textContent = diskMass.toExponential(1) + ' M_sun';
@@ -1956,808 +1132,17 @@ function updatePhotometricPanel() {
     document.getElementById('mass-model-total-value').textContent = totalMass.toExponential(1) + ' M_sun';
 }
 
-/**
- * Populate the read-only Observation mode mass panel from photometric_mass_model.
- * Called when entering Observation mode so the panel shows current photometric values.
- */
-function populateObservationMassPanel() {
-    var el = function(id) { return document.getElementById(id); };
-    if (!el('obs-gas-mass-value')) return;
-    var pm = sandboxResult && sandboxResult.photometric_mass_model;
-    if (!pm) {
-        el('obs-gas-mass-value').textContent = '--';
-        el('obs-gas-scale-value').textContent = '--';
-        el('obs-disk-mass-value').textContent = '--';
-        el('obs-disk-scale-value').textContent = '--';
-        el('obs-bulge-mass-value').textContent = '--';
-        el('obs-bulge-scale-value').textContent = '--';
-        el('obs-mass-model-total-value').textContent = '--';
-        return;
-    }
-    var gasMass = pm.gas ? pm.gas.M : 0;
-    var gasScale = pm.gas ? pm.gas.Rd : 0;
-    var diskMass = pm.disk ? pm.disk.M : 0;
-    var diskScale = pm.disk ? pm.disk.Rd : 0;
-    var bulgeMass = pm.bulge ? pm.bulge.M : 0;
-    var bulgeScale = pm.bulge ? pm.bulge.a : 0;
-    var totalMass = gasMass + diskMass + bulgeMass;
-    el('obs-gas-mass-value').textContent = gasMass.toExponential(1) + ' M_sun';
-    el('obs-gas-scale-value').textContent = gasScale.toFixed(1) + ' kpc';
-    el('obs-disk-mass-value').textContent = diskMass.toExponential(1) + ' M_sun';
-    el('obs-disk-scale-value').textContent = diskScale.toFixed(1) + ' kpc';
-    el('obs-bulge-mass-value').textContent = bulgeMass.toExponential(1) + ' M_sun';
-    el('obs-bulge-scale-value').textContent = bulgeScale.toFixed(1) + ' kpc';
-    el('obs-mass-model-total-value').textContent = totalMass.toExponential(1) + ' M_sun';
-}
-
-function updateDiagnosticsPanel() {
-    var section = document.getElementById('gfd-diagnostics-section');
-    var body = document.getElementById('gfd-diagnostics-body');
-    if (!section || !body) return;
-    if (!sandboxResult) { section.style.display = 'none'; return; }
-
-    section.style.display = '';
-    var fg = sandboxResult.field_geometry || {};
-    var vs = sandboxResult.vortex_signal || {};
-    var hasBayesian = sandboxResult.rms != null;
-    var rms = sandboxResult.rms || 0;
-    var chi2 = sandboxResult.chi2_dof || 0;
-    var nObs = sandboxResult.n_obs || 0;
-
-    var rvis90 = fg.visible_radius_90_kpc || 0;
-    var rvis99 = fg.visible_radius_99_kpc || 0;
-    var rvisStr = (rvis90 && rvis99)
-        ? rvis90.toFixed(1) + ' to ' + rvis99.toFixed(1) + ' kpc (90% to 99.5%)'
-        : (fg.visible_radius_kpc ? fg.visible_radius_kpc.toFixed(2) + ' kpc' : 'N/A');
-
-    var pendingSpan = '<span style="color:#666;font-style:italic">switch to Observations</span>';
-
-    var html = '';
-    html += '<div style="color:#999;font-weight:600;margin-bottom:4px;">Bayesian Fit</div>';
-    if (hasBayesian) {
-        html += 'RMS: <span style="color:#e0e0e0">' + rms.toFixed(2) + ' km/s</span><br>';
-        html += 'chi2/dof: <span style="color:#e0e0e0">' + chi2.toFixed(4) + '</span><br>';
-        html += 'Observations: <span style="color:#e0e0e0">' + nObs + '</span><br>';
+function updateFieldGeometryMetrics(fg) {
+    var originEl = document.getElementById('metric-field-origin');
+    var horizonEl = document.getElementById('metric-field-horizon');
+    if (!originEl || !horizonEl) return;
+    if (fg && fg.throat_radius_kpc != null) {
+        originEl.textContent = fg.throat_radius_kpc.toFixed(1) + ' kpc';
+        horizonEl.textContent = (fg.envelope_radius_kpc || 0).toFixed(1) + ' kpc';
     } else {
-        html += 'RMS: ' + pendingSpan + '<br>';
-        html += 'chi2/dof: ' + pendingSpan + '<br>';
-        html += 'Observations: <span style="color:#e0e0e0">' + nObs + '</span><br>';
+        originEl.textContent = '--';
+        horizonEl.textContent = '--';
     }
-
-    html += '<div style="color:#999;font-weight:600;margin-top:8px;margin-bottom:4px;">Vortex Signal (MACD)</div>';
-    if (hasBayesian) {
-        html += 'sigma (net): <span style="color:#e0e0e0">' + (vs.sigma_net || 0).toFixed(4) + '</span><br>';
-        html += 'Boost energy: <span style="color:#4caf50">+' + Math.round(vs.energy_boost || 0).toLocaleString() + ' km2/s2</span><br>';
-        html += 'Suppress energy: <span style="color:#ff6b6b">' + Math.round(vs.energy_suppress || 0).toLocaleString() + ' km2/s2</span><br>';
-        html += 'Boost/Suppress: <span style="color:#e0e0e0">' + (vs.energy_ratio || 0).toFixed(2) + '</span><br>';
-    } else {
-        html += 'sigma (net): ' + pendingSpan + '<br>';
-        html += 'Boost energy: ' + pendingSpan + '<br>';
-        html += 'Suppress energy: ' + pendingSpan + '<br>';
-        html += 'Boost/Suppress: ' + pendingSpan + '<br>';
-    }
-
-    html += '<div style="color:#999;font-weight:600;margin-top:8px;margin-bottom:4px;">Field Geometry</div>';
-    html += 'R_t (throat): <span style="color:#00ff88">' + (fg.throat_radius_kpc ? fg.throat_radius_kpc.toFixed(2) + ' kpc' : 'N/A') + '</span><br>';
-    html += 'R_env (field horizon): <span style="color:#ff6688">' + (fg.envelope_radius_kpc ? fg.envelope_radius_kpc.toFixed(2) + ' kpc' : 'N/A') + '</span><br>';
-    var rHiVal = sandboxResult.sparc_r_hi_kpc;
-    html += 'R_HI (SPARC extent): <span style="color:#ffaa44">' + (rHiVal ? rHiVal.toFixed(1) + ' kpc' : 'N/A') + '</span><br>';
-    html += 'R_vis (baryonic extent): <span style="color:#aa88ff">' + rvisStr + '</span><br>';
-    html += 'R_t / R_env: <span style="color:#e0e0e0">' + (fg.throat_fraction ? fg.throat_fraction.toFixed(4) : 'N/A') + '</span><br>';
-    html += 'Cycle: <span style="color:#e0e0e0">' + (fg.cycle || '?') + '</span>';
-
-    var accelRatio = sandboxResult.accel_ratio_fitted;
-    var accelRms = sandboxResult.accel_rms;
-    if (accelRatio != null) {
-        html += '<div style="color:#999;font-weight:600;margin-top:8px;margin-bottom:4px;">Acceleration Fit</div>';
-        html += 'a0 ratio: <span style="color:#aa44ff">' + accelRatio.toFixed(4) + 'x</span><br>';
-        html += 'RMS: <span style="color:#e0e0e0">' + (accelRms || 0).toFixed(2) + ' km/s</span><br>';
-    }
-
-    body.innerHTML = html;
-}
-
-/**
- * Find the prediction counterpart for an inference galaxy and return
- * its observations array, or null if none available.
- */
-function getPredictionObservations(inferenceGalaxy) {
-    if (!inferenceGalaxy) return null;
-    var baseId = inferenceGalaxy.id.replace(/_inference$/, '');
-    if (baseId === 'mw') baseId = 'milky_way';
-    var predictions = galaxyCatalog.prediction || [];
-    for (var i = 0; i < predictions.length; i++) {
-        if (predictions[i].id === baseId && predictions[i].observations) {
-            return predictions[i].observations;
-        }
-    }
-    return null;
-}
-
-// =====================================================================
-// MULTI-POINT INFERENCE ANALYSIS
-// =====================================================================
-
-/**
- * Scale a mass model by a factor (multiply all component masses).
- */
-function scaleMassModel(model, factor) {
-    var scaled = {};
-    var comps = ['bulge', 'disk', 'gas'];
-    for (var c = 0; c < comps.length; c++) {
-        var key = comps[c];
-        if (model[key]) {
-            scaled[key] = {};
-            for (var prop in model[key]) {
-                scaled[key][prop] = model[key][prop];
-            }
-            if (scaled[key].M) scaled[key].M *= factor;
-        }
-    }
-    return scaled;
-}
-
-/**
- * Interpolate the GFD curve (dataset 1) to get velocity at a given radius.
- */
-/**
- * Interpolate any chart dataset curve at an arbitrary radius.
- * Uses linear interpolation between bracketing points.
- * @param {number} datasetIndex - Chart dataset index (0=Newton, 1=GFD, 2=MOND, 7=CDM)
- * @param {number} radius - Galactocentric radius in kpc
- * @returns {number|null} Interpolated velocity in km/s, or null if no data
- */
-function interpolateCurve(datasetIndex, radius) {
-    var data = chart.data.datasets[datasetIndex].data;
-    if (!data || data.length === 0) return null;
-    // Before first point
-    if (radius <= data[0].x) return data[0].y;
-    // Find bracketing points
-    for (var i = 1; i < data.length; i++) {
-        if (data[i].x >= radius) {
-            var x0 = data[i-1].x, y0 = data[i-1].y;
-            var x1 = data[i].x, y1 = data[i].y;
-            if (x1 === x0) return y0;
-            var t = (radius - x0) / (x1 - x0);
-            return y0 + t * (y1 - y0);
-        }
-    }
-    // Beyond curve range -- return null to avoid stale extrapolation
-    return null;
-}
-
-/** Shorthand: interpolate GFD curve (dataset 1) */
-function interpolateGFDVelocity(radius) {
-    return interpolateCurve(1, radius);
-}
-
-async function runMultiPointInference(accelRatio, massModel) {
-    var multiDiv = document.getElementById('multi-inference-result');
-    var multiBody = document.getElementById('multi-inference-body');
-    if (!multiDiv || !multiBody) return;
-
-    if (currentMode !== 'inference' && !isAutoFitted) {
-        multiDiv.style.display = 'none';
-        clearInferenceChart();
-        return;
-    }
-
-    // Use pinned observations if user is fine-tuning, otherwise fall back to currentExample
-    var observations = pinnedObservations || (currentExample ? getPredictionObservations(currentExample) : null);
-    if (!observations || observations.length < 2) {
-        multiDiv.style.display = 'none';
-        clearInferenceChart();
-        return;
-    }
-
-    try {
-        var result = await fetchMultiPointInference(observations, accelRatio, massModel);
-        if (!result || !result.points) {
-            multiDiv.style.display = 'none';
-            clearInferenceChart();
-            return;
-        }
-
-        // Cache for band method switching
-        var modelTotal = 0;
-        var comps = ['bulge', 'disk', 'gas'];
-        for (var c = 0; c < comps.length; c++) {
-            if (massModel[comps[c]] && massModel[comps[c]].M) {
-                modelTotal += massModel[comps[c]].M;
-            }
-        }
-        lastMultiResult = result;
-        lastModelTotal = modelTotal;
-        lastAccelRatio = accelRatio;
-        lastMassModel = massModel;
-
-        // Clear inference markers (green diamonds removed for cleaner UI)
-        chart.data.datasets[6].data = [];
-
-        // Render sidebar first so #band-width-display exists in the DOM
-        // before updateBand() calls updateBandLabel()
-        renderMultiPointSidebar(result, modelTotal);
-
-        // Compute and render the band for the selected method
-        await updateBand();
-
-    } catch (err) {
-        console.error('Multi-point inference error:', err);
-        multiDiv.style.display = 'none';
-        clearInferenceChart();
-    }
-}
-
-/**
- * Compute the band half-width for the selected method.
- * Returns the half-width in solar masses.
- */
-function getBandHalfWidth(method) {
-    var result = lastMultiResult;
-    var modelTotal = lastModelTotal;
-    if (!result || !result.points || modelTotal <= 0) return 0;
-
-    var points = result.points;
-    var methods = result.band_methods || {};
-
-    if (method === 'weighted_rms') {
-        // Weighted RMS from anchor (computed on frontend)
-        var wSumSqDev = 0, wSumW = 0;
-        for (var i = 0; i < points.length; i++) {
-            var w = points[i].enclosed_frac;
-            var diff = points[i].inferred_total - modelTotal;
-            wSumSqDev += w * diff * diff;
-            wSumW += w;
-        }
-        return wSumW > 0 ? Math.sqrt(wSumSqDev / wSumW) : 0;
-    }
-    if (method === 'weighted_scatter') return methods.weighted_scatter || 0;
-    if (method === 'obs_error') return methods.obs_error || 0;
-    if (method === 'min_max') {
-        // Max absolute deviation from anchor -- guarantees all points
-        // fall inside the band when centered on modelTotal.
-        var maxDev = 0;
-        for (var i = 0; i < points.length; i++) {
-            var dev = Math.abs(points[i].inferred_total - modelTotal);
-            if (dev > maxDev) maxDev = dev;
-        }
-        return maxDev;
-    }
-    if (method === 'iqr') return methods.iqr || 0;
-    return 0;
-}
-
-/**
- * Get a human-readable label and description for a band method.
- */
-function getBandMethodInfo(method) {
-    var labels = {
-        'weighted_rms':     {label: 'Weighted RMS',  desc: 'Spread of per-point mass estimates vs GFD model, weighted by enclosed fraction'},
-        'weighted_scatter': {label: '1-sigma Scatter', desc: 'Weighted std dev of per-point mass estimates around their mean'},
-        'obs_error':        {label: 'Obs. Error',   desc: 'Propagated velocity measurement uncertainties through the field equation'},
-        'min_max':          {label: 'Min-Max',       desc: 'Full range of per-point inferred masses (most conservative)'},
-        'iqr':              {label: 'IQR (Robust)',  desc: 'Interquartile range, resistant to outlier inner points'}
-    };
-    return labels[method] || {label: method, desc: ''};
-}
-
-/**
- * Recompute and render the confidence band.
- *
- * In Auto Fit mode the band is the (4/pi)^(1/4) geometric band
- * around the GFD base curve, derived from the k=4 coupling topology.
- * This gives a +/- 6.2% physics-derived uncertainty envelope.
- */
-async function updateBand() {
-    // In observation mode wrap the band around GFD (Velocity) (dataset 11);
-    // otherwise use GFD base (dataset 1).
-    var gfdData = isAutoFitted
-        ? chart.data.datasets[11].data
-        : chart.data.datasets[1].data;
-    if (!gfdData || gfdData.length === 0) {
-        chart.data.datasets[4].data = [];
-        chart.data.datasets[5].data = [];
-        chart.update('none');
-        return;
-    }
-
-    var pct = parseFloat(lensSlider.value) / 100.0;
-    var upperData = [], lowerData = [];
-    for (var i = 0; i < gfdData.length; i++) {
-        var v = gfdData[i].y;
-        var x = gfdData[i].x;
-        upperData.push({x: x, y: v * (1 + pct)});
-        lowerData.push({x: x, y: v * (1 - pct)});
-    }
-    chart.data.datasets[4].data = upperData;
-    chart.data.datasets[5].data = lowerData;
-
-    chart.update('none');
-    updateBandLabel();
-}
-
-/**
- * Update just the band width display in the sidebar.
- */
-function updateBandLabel() {
-    var el = document.getElementById('band-width-display');
-    if (!el) return;
-    if (isAutoFitted) {
-        el.innerHTML = '<strong style="color:#e0e0e0;">Band:</strong> '
-            + '<span style="color:#76FF03;">(4/\u03C0)<sup>1/4</sup> = \u00B16.2%</span>'
-            + '<div style="font-size:0.8em; color:#606060; margin-top:2px;">'
-            + 'Geometric envelope from k=4 coupling topology</div>';
-    } else {
-        el.innerHTML = '';
-    }
-}
-
-/**
- * Render the lens throughput band from the slider value around the GFD curve.
- * Called when the lens slider changes or after chart data updates.
- */
-function updateLensBand() {
-    // In observation mode wrap the band around GFD (Velocity) (dataset 11)
-    var gfdData = isAutoFitted
-        ? chart.data.datasets[11].data
-        : chart.data.datasets[1].data;
-    if (!gfdData || gfdData.length === 0) {
-        chart.data.datasets[4].data = [];
-        chart.data.datasets[5].data = [];
-        chart.update('none');
-        return;
-    }
-    var pct = parseFloat(lensSlider.value) / 100.0;
-    var upperData = [], lowerData = [];
-    for (var i = 0; i < gfdData.length; i++) {
-        var v = gfdData[i].y;
-        var x = gfdData[i].x;
-        upperData.push({x: x, y: v * (1 + pct)});
-        lowerData.push({x: x, y: v * (1 - pct)});
-    }
-    chart.data.datasets[4].data = upperData;
-    chart.data.datasets[5].data = lowerData;
-    chart.update('none');
-}
-
-/**
- * Render the multi-point sidebar statistics and table.
- */
-function renderMultiPointSidebar(result, modelTotal) {
-    var multiDiv = document.getElementById('multi-inference-result');
-    var multiBody = document.getElementById('multi-inference-body');
-    if (!multiDiv || !multiBody) return;
-
-    var wMean = result.weighted_mean;
-    var wStd = result.weighted_std;
-    var wCv = result.weighted_cv_percent;
-    var wExp = Math.floor(Math.log10(wMean));
-    var wCoeff = wMean / Math.pow(10, wExp);
-    var wStdCoeff = wStd / Math.pow(10, wExp);
-
-    var anchorExp = Math.floor(Math.log10(modelTotal));
-    var anchorCoeff = modelTotal / Math.pow(10, anchorExp);
-
-    var html = '';
-
-    html += '<div style="margin-bottom: 10px; line-height: 1.5;">';
-    html += 'Mass inferred at <strong style="color:#e0e0e0;">' + result.n_points + '</strong> radii. ';
-    html += '<span style="color:#76FF03;">Band</span> = GFD / GFD\u03C6 envelope.';
-    html += '</div>';
-
-    html += '<div style="margin-bottom: 6px;">';
-    html += '<strong style="color:#e0e0e0;">GFD Model:</strong> ';
-    html += '<span style="color:#4da6ff;">' + anchorCoeff.toFixed(2);
-    html += ' \u00D7 10' + superscript(anchorExp) + ' M\u2609</span>';
-    html += '</div>';
-
-    html += '<div style="margin-bottom: 6px;">';
-    html += '<strong style="color:#e0e0e0;">Obs. Mean:</strong> ';
-    html += '<span style="color:#e0e0e0;">' + wCoeff.toFixed(2) + ' \u00B1 ' + wStdCoeff.toFixed(2);
-    html += ' \u00D7 10' + superscript(wExp) + ' M\u2609</span>';
-    html += '</div>';
-
-    // Band width display (updated dynamically when method changes)
-    html += '<div id="band-width-display" style="margin-bottom: 6px;"></div>';
-
-    var agreementPct = Math.abs(wMean - modelTotal) / modelTotal * 100;
-    var agColor = agreementPct < 10 ? '#4caf50' : agreementPct < 30 ? '#ffa726' : '#ef5350';
-    var agSign = wMean < modelTotal ? '-' : '+';
-    html += '<div style="margin-bottom: 10px;">';
-    html += '<strong style="color:#e0e0e0;">Mass Offset:</strong> ';
-    html += '<span style="color:' + agColor + ';">' + agSign + agreementPct.toFixed(1) + '%</span>';
-    html += ' <span style="color:#606060; font-size:0.85em;">(obs. mean vs GFD model)</span>';
-    html += '</div>';
-
-    // Per-point table
-    html += '<table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:0.85em;">';
-    html += '<tr style="border-bottom:1px solid #404040; color:#808080;">';
-    html += '<th style="text-align:left; padding:4px 6px;">r (kpc)</th>';
-    html += '<th style="text-align:left; padding:4px 6px;">v (km/s)</th>';
-    html += '<th style="text-align:right; padding:4px 6px;">M enc.</th>';
-    html += '<th style="text-align:right; padding:4px 6px;" title="Velocity residual: observed minus GFD model">\u0394v</th>';
-    html += '<th style="text-align:right; padding:4px 6px;" title="Sigma deviation: |v_obs - v_GFD| / error">\u03C3</th>';
-    html += '</tr>';
-
-    for (var i = 0; i < result.points.length; i++) {
-        var pt = result.points[i];
-        var errStr = pt.err ? ' \u00B1 ' + pt.err : '';
-        var encPct = (pt.enclosed_frac * 100).toFixed(0);
-        var rowOpacity = pt.enclosed_frac < 0.1 ? 'opacity: 0.5;' : '';
-        // Velocity residual: compare observed v to GFD prediction at this radius
-        var gfdV = interpolateGFDVelocity(pt.r_kpc);
-        var deltaV = gfdV !== null ? (pt.v_km_s - gfdV) : null;
-        var sigmaAway = (deltaV !== null && pt.err > 0) ? Math.abs(deltaV) / pt.err : null;
-        var dvColor = '#4caf50';
-        if (sigmaAway !== null) {
-            dvColor = sigmaAway < 1 ? '#4caf50' : sigmaAway < 2 ? '#ffa726' : '#ef5350';
-        }
-        var dvStr = deltaV !== null ? ((deltaV >= 0 ? '+' : '') + deltaV.toFixed(1)) : '\u2014';
-        var sigStr = sigmaAway !== null ? sigmaAway.toFixed(1) : '\u2014';
-        html += '<tr style="border-bottom:1px solid #2a2a2a; ' + rowOpacity + '">';
-        html += '<td style="padding:3px 6px; color:#e0e0e0;">' + pt.r_kpc + '</td>';
-        html += '<td style="padding:3px 6px; color:#e0e0e0;">' + pt.v_km_s + errStr + '</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:#808080;">' + encPct + '%</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:' + dvColor + ';">' + dvStr + '</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:' + dvColor + ';">' + sigStr + '</td>';
-        html += '</tr>';
-    }
-    html += '</table>';
-
-    html += '<div style="margin-top: 8px; font-size: 0.8em; color: #606060;">';
-    html += '\u0394v = v<sub>obs</sub> \u2212 v<sub>GFD</sub> (km/s). \u03C3 = |\u0394v| / error.';
-    html += '</div>';
-
-    // ── Shape Diagnostic ──
-    // Split points into inner half and outer half, compute mean delta-v and sigma
-    var dvArr = [];
-    for (var i = 0; i < result.points.length; i++) {
-        var pt = result.points[i];
-        if (pt.enclosed_frac < 0.05) continue;  // skip unreliable innermost
-        var gfdV = interpolateGFDVelocity(pt.r_kpc);
-        if (gfdV === null) continue;
-        var dv = pt.v_km_s - gfdV;
-        var sig = (pt.err && pt.err > 0) ? Math.abs(dv) / pt.err : 0;
-        dvArr.push({ r: pt.r_kpc, dv: dv, sigma: sig });
-    }
-
-    if (dvArr.length >= 4) {
-        var mid = Math.floor(dvArr.length / 2);
-        var innerPts = dvArr.slice(0, mid);
-        var outerPts = dvArr.slice(mid);
-
-        var avgInnerDv = innerPts.reduce(function(s, p) { return s + p.dv; }, 0) / innerPts.length;
-        var avgOuterDv = outerPts.reduce(function(s, p) { return s + p.dv; }, 0) / outerPts.length;
-        var avgInnerSig = innerPts.reduce(function(s, p) { return s + p.sigma; }, 0) / innerPts.length;
-        var avgOuterSig = outerPts.reduce(function(s, p) { return s + p.sigma; }, 0) / outerPts.length;
-
-        var innerR = innerPts[innerPts.length - 1].r;
-        var outerR0 = outerPts[0].r;
-
-        var innerColor = avgInnerSig < 1 ? '#4caf50' : avgInnerSig < 2 ? '#ffa726' : '#ef5350';
-        var outerColor = avgOuterSig < 1 ? '#4caf50' : avgOuterSig < 2 ? '#ffa726' : '#ef5350';
-
-        html += '<div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #404040;">';
-        html += '<strong style="color: #e0e0e0;">Shape Diagnostic</strong>';
-        html += '<table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:0.85em;">';
-        html += '<tr style="border-bottom:1px solid #404040; color:#808080;">';
-        html += '<th style="text-align:left; padding:3px 6px;">Region</th>';
-        html += '<th style="text-align:right; padding:3px 6px;">Mean \u0394v</th>';
-        html += '<th style="text-align:right; padding:3px 6px;">Mean \u03C3</th>';
-        html += '</tr>';
-        html += '<tr style="border-bottom:1px solid #2a2a2a;">';
-        html += '<td style="padding:3px 6px; color:#b0b0b0;">Inner (r < ' + innerR.toFixed(1) + ')</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:' + innerColor + ';">' + (avgInnerDv >= 0 ? '+' : '') + avgInnerDv.toFixed(1) + '</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:' + innerColor + ';">' + avgInnerSig.toFixed(1) + '</td>';
-        html += '</tr>';
-        html += '<tr style="border-bottom:1px solid #2a2a2a;">';
-        html += '<td style="padding:3px 6px; color:#b0b0b0;">Outer (r > ' + outerR0.toFixed(1) + ')</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:' + outerColor + ';">' + (avgOuterDv >= 0 ? '+' : '') + avgOuterDv.toFixed(1) + '</td>';
-        html += '<td style="text-align:right; padding:3px 6px; color:' + outerColor + ';">' + avgOuterSig.toFixed(1) + '</td>';
-        html += '</tr>';
-        html += '</table>';
-
-        // Recommendation logic: sigma is the gatekeeper, not raw delta-v.
-        // If both regions have low sigma, the fit is good regardless of
-        // the raw km/s offset (which may just reflect measurement scatter).
-        var overallSig = (avgInnerSig + avgOuterSig) / 2;
-        var bothGood = avgInnerSig < 1.5 && avgOuterSig < 1.5;
-        var innerBad = avgInnerSig >= 2;
-        var outerBad = avgOuterSig >= 2;
-        var innerOver = avgInnerDv < 0;   // GFD overpredicts inner = negative dv
-        var outerOver = avgOuterDv < 0;
-        // Gradient only meaningful when at least one region has significant sigma
-        var hasShapeIssue = (innerBad || outerBad) && Math.abs(avgInnerSig - avgOuterSig) > 1.5;
-
-        if (bothGood) {
-            // Both regions within ~1.5 sigma -- excellent fit
-            html += '<div style="margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #4caf50; font-size: 0.85em;">';
-            html += '<div style="color: #4caf50;">';
-            html += '<strong>Excellent shape fit</strong> \u2014 all residuals within measurement error.';
-            html += '</div>';
-            html += '</div>';
-        } else if (hasShapeIssue) {
-            html += '<div style="margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #4da6ff; font-size: 0.85em;">';
-
-            if (innerBad && !outerBad && innerOver) {
-                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
-                html += '<strong>Mass too centrally concentrated</strong>';
-                html += '</div>';
-                html += '<div style="color: #b0b0b0;">';
-                html += 'Inner radii: mean ' + avgInnerSig.toFixed(1) + '\u03C3 deviation. ';
-                html += 'Try <strong style="color:#4da6ff;">increasing</strong> the Disk or Gas ';
-                html += '<strong style="color:#4da6ff;">Scale length</strong> to redistribute mass outward.';
-                html += '</div>';
-            } else if (innerBad && !outerBad && !innerOver) {
-                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
-                html += '<strong>Mass deficit at center</strong>';
-                html += '</div>';
-                html += '<div style="color: #b0b0b0;">';
-                html += 'Inner radii: mean ' + avgInnerSig.toFixed(1) + '\u03C3 deviation. ';
-                html += 'Try <strong style="color:#4da6ff;">decreasing</strong> the Disk or Gas ';
-                html += '<strong style="color:#4da6ff;">Scale length</strong>, ';
-                html += 'or increasing the Bulge <strong style="color:#4da6ff;">Scale radius</strong>.';
-                html += '</div>';
-            } else if (!innerBad && outerBad && outerOver) {
-                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
-                html += '<strong>Mass too radially extended</strong>';
-                html += '</div>';
-                html += '<div style="color: #b0b0b0;">';
-                html += 'Outer radii: mean ' + avgOuterSig.toFixed(1) + '\u03C3 deviation. ';
-                html += 'Try <strong style="color:#4da6ff;">decreasing</strong> the Disk or Gas ';
-                html += '<strong style="color:#4da6ff;">Scale length</strong> to concentrate mass inward.';
-                html += '</div>';
-            } else if (!innerBad && outerBad && !outerOver) {
-                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
-                html += '<strong>Mass deficit at outer radii</strong>';
-                html += '</div>';
-                html += '<div style="color: #b0b0b0;">';
-                html += 'Outer radii: mean ' + avgOuterSig.toFixed(1) + '\u03C3 deviation. ';
-                html += 'Try <strong style="color:#4da6ff;">increasing</strong> the Gas ';
-                html += '<strong style="color:#4da6ff;">Scale length</strong> to extend the mass distribution.';
-                html += '</div>';
-            } else {
-                html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
-                html += '<strong>Shape mismatch</strong>';
-                html += '</div>';
-                html += '<div style="color: #b0b0b0;">';
-                html += 'Adjust the Disk and Gas <strong style="color:#4da6ff;">Scale length</strong> sliders to improve the inner/outer balance.';
-                html += '</div>';
-            }
-
-            html += '</div>';
-        } else if (innerBad && outerBad) {
-            // Both regions have high sigma -- systematic issue
-            html += '<div style="margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #ffa726; font-size: 0.85em;">';
-            html += '<div style="color: #e0e0e0; margin-bottom: 4px;">';
-            html += '<strong>Systematic ' + (innerOver ? 'overestimate' : 'underestimate') + '</strong>';
-            html += '</div>';
-            html += '<div style="color: #b0b0b0;">';
-            html += 'Mean deviation: ' + overallSig.toFixed(1) + '\u03C3 across all radii. ';
-            html += 'The overall normalization may need adjustment.';
-            html += '</div>';
-            html += '</div>';
-        } else {
-            // Moderate fit -- one region borderline
-            html += '<div style="margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #ffa726; font-size: 0.85em;">';
-            html += '<div style="color: #ffa726;">';
-            html += '<strong>Adequate fit</strong> \u2014 mean ' + overallSig.toFixed(1) + '\u03C3 deviation. Adjust the Scale length sliders to improve.';
-            html += '</div>';
-            html += '</div>';
-        }
-
-        html += '</div>';
-    }
-
-    multiBody.innerHTML = html;
-    multiDiv.style.display = 'block';
-
-    // Initialize band label for current method
-    updateBandLabel();
-}
-
-/**
- * Clear inference-specific chart elements (band + markers).
- */
-function clearInferenceChart() {
-    if (chart.data.datasets.length > 6) {
-        chart.data.datasets[6].data = [];
-    }
-    lastMultiResult = null;
-    lastModelTotal = 0;
-    chart.update('none');
-}
-
-// =====================================================================
-// CHART UPDATE (calls API)
-// =====================================================================
-
-function debouncedUpdateChart() {
-    clearTimeout(updateTimer);
-    updateTimer = setTimeout(updateChart, DEBOUNCE_MS);
-}
-
-async function updateChart() {
-    const maxRadius = parseFloat(distanceSlider.value);
-    const accelRatio = parseFloat(accelSlider.value);
-    var lastApiData = null; // local ref, also stored as lastApiResponse
-
-    if (currentMode === 'inference') {
-        const massModel = getMassModelFromSliders();
-
-        try {
-            var chartMaxR = maxRadius;
-            var predObs = pinnedObservations || (currentExample ? getPredictionObservations(currentExample) : null);
-            if (predObs && predObs.length > 0) {
-                var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
-                chartMaxR = Math.max(chartMaxR, maxObsR * 1.15);
-            }
-            // In observation mode, extend chart to show the field horizon.
-            // Use derived R_env if available, otherwise the slider value.
-            var horizonR = (inferredFieldGeometry && inferredFieldGeometry.envelope_radius_kpc)
-                ? inferredFieldGeometry.envelope_radius_kpc
-                : getGalacticRadius();
-            if (horizonR) {
-                chartMaxR = Math.max(chartMaxR, horizonR * 1.15);
-            }
-
-            // Run inference only when entering Observation mode.
-            // After that, use prediction endpoint so the optimizer
-            // doesn't overwrite user slider adjustments.
-            // In observation mode, use the derived R_env (from
-            // solve_field_geometry) so the prediction endpoint's sigma
-            // stage stays consistent with the inference result.
-            var effectiveGR = (isAutoFitted
-                && inferredFieldGeometry
-                && inferredFieldGeometry.envelope_radius_kpc)
-                ? inferredFieldGeometry.envelope_radius_kpc
-                : getGalacticRadius();
-            var data;
-            if (inferenceNeeded) {
-                inferenceNeeded = false;
-                data = await fetchInferRotationCurve(chartMaxR, accelRatio, massModel, predObs, effectiveGR);
-            } else {
-                data = await fetchRotationCurve(chartMaxR, accelRatio, massModel, predObs, effectiveGR);
-            }
-            lastApiData = data;
-            lastApiResponse = data;
-            if (data.field_geometry) {
-                inferredFieldGeometry = data.field_geometry;
-            }
-            renderCurves(data);
-            syncThroughputFromResponse(data);
-
-            // Show observation points
-            var obsEnabled = isChipEnabled('observed');
-            var visibleObs = predObs;
-            if (visibleObs && visibleObs.length > 0) {
-                chart.data.datasets[3].data = visibleObs.map(function(obs) {
-                    return {x: obs.r, y: obs.v, err: obs.err || 0};
-                });
-                chart.data.datasets[3].hidden = !obsEnabled;
-                observedLegend.style.display = obsEnabled ? 'flex' : 'none';
-            } else if (currentExample) {
-                chart.data.datasets[3].data = [{x: r_obs, y: v_obs}];
-                chart.data.datasets[3].hidden = !obsEnabled;
-                observedLegend.style.display = obsEnabled ? 'flex' : 'none';
-            } else {
-                chart.data.datasets[3].data = [];
-                chart.data.datasets[3].hidden = true;
-                observedLegend.style.display = 'none';
-            }
-
-            // Multi-point consistency analysis (fire-and-forget)
-            runMultiPointInference(accelRatio, massModel);
-
-        } catch (err) {
-            console.error('Auto Fit API error:', err);
-        }
-    } else {
-        // Explore mode: use distributed mass model from sliders
-        const massModel = getMassModelFromSliders();
-
-        try {
-            // Pass observations for CDM halo fitting when available
-            var predObs = pinnedObservations || (currentExample ? currentExample.observations : null);
-            var predMaxR = maxRadius;
-            if (predObs && predObs.length > 0) {
-                var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
-                predMaxR = Math.max(predMaxR, maxObsR * 1.15);
-            }
-            const data = await fetchRotationCurve(predMaxR, accelRatio, massModel, predObs, getGalacticRadius());
-            lastApiData = data;
-            lastApiResponse = data;
-            renderCurves(data);
-            syncThroughputFromResponse(data);
-
-            // Handle observed data
-            var visibleObs = pinnedObservations || (currentExample ? currentExample.observations : null);
-            var obsEnabled = isChipEnabled('observed');
-            if (visibleObs && visibleObs.length > 0) {
-                chart.data.datasets[3].data = visibleObs.map(obs => ({
-                    x: obs.r, y: obs.v, err: obs.err || 0
-                }));
-                chart.data.datasets[3].hidden = !obsEnabled;
-                observedLegend.style.display = obsEnabled ? 'flex' : 'none';
-            } else {
-                chart.data.datasets[3].data = [];
-                chart.data.datasets[3].hidden = true;
-                observedLegend.style.display = 'none';
-            }
-        } catch (err) {
-            console.error('Rotation curve API error:', err);
-        }
-    }
-
-    chart.update('none');
-    updateRightPanel(lastApiData);
-}
-
-function renderCurves(data) {
-    const newtonianData = [];
-    const dtgData = [];
-    const mondData = [];
-    const cdmData = [];
-    const gfdSymmetricData = [];
-
-    for (let i = 0; i < data.radii.length; i++) {
-        newtonianData.push({x: data.radii[i], y: data.newtonian[i]});
-        dtgData.push({x: data.radii[i], y: data.dtg[i]});
-        mondData.push({x: data.radii[i], y: data.mond[i]});
-        if (data.cdm) {
-            cdmData.push({x: data.radii[i], y: data.cdm[i]});
-        }
-        if (data.gfd_symmetric) {
-            gfdSymmetricData.push({x: data.radii[i], y: data.gfd_symmetric[i]});
-        }
-    }
-
-    chart.data.labels = [];
-
-    // When sandbox data is loaded, it owns datasets 1 and 8; still fill
-    // Newton/MOND/CDM from API so researchers can toggle them on.
-    if (sandboxResult) {
-        chart.data.datasets[0].data = newtonianData;
-        chart.data.datasets[2].data = mondData;
-        chart.data.datasets[7].data = cdmData;
-        chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
-        chart.data.datasets[2].hidden = !isChipEnabled('mond');
-        chart.data.datasets[7].hidden = !isChipEnabled('cdm');
-        chart.data.datasets[4].data = [];
-        chart.data.datasets[5].data = [];
-        chart.data.datasets[9].data = [];
-    } else {
-        chart.data.datasets[0].data = newtonianData;
-        chart.data.datasets[1].data = dtgData;
-        chart.data.datasets[2].data = mondData;
-        chart.data.datasets[7].data = cdmData;
-        chart.data.datasets[0].hidden = !isChipEnabled('newtonian');
-        chart.data.datasets[2].hidden = !isChipEnabled('mond');
-        chart.data.datasets[7].hidden = !isChipEnabled('cdm');
-        chart.data.datasets[8].data = [];
-        chart.data.datasets[9].data = gfdSymmetricData;
-
-        if (dtgData.length > 0) {
-            var pct = parseFloat(lensSlider.value) / 100.0;
-            var bandUpper = [];
-            var bandLower = [];
-            for (var i = 0; i < dtgData.length; i++) {
-                var v = dtgData[i].y;
-                var r = dtgData[i].x;
-                bandUpper.push({x: r, y: v * (1 + pct)});
-                bandLower.push({x: r, y: v * (1 - pct)});
-            }
-            chart.data.datasets[4].data = bandUpper;
-            chart.data.datasets[5].data = bandLower;
-        }
-    }
-
-    // Store CDM halo info for display
-    lastCdmHalo = data.cdm_halo || null;
-    updateCdmHaloPanel();
-
-    // Update right metrics panel with live data
-    updateMetricsPanel(data);
 }
 
 function updateCdmHaloPanel() {
@@ -2797,13 +1182,26 @@ function updateCdmHaloPanel() {
 }
 
 // =====================================================================
-// RIGHT METRICS PANEL
+// CURVE INTERPOLATION
 // =====================================================================
 
-/**
- * Linearly interpolate the GFD curve value at a given radius.
- * gfdData is an array of {x, y} sorted by x.
- */
+function interpolateCurve(datasetIndex, radius) {
+    var data = chart.data.datasets[datasetIndex].data;
+    if (!data || data.length === 0) return null;
+    if (radius <= data[0].x) return data[0].y;
+    if (radius >= data[data.length - 1].x) return data[data.length - 1].y;
+    for (var i = 1; i < data.length; i++) {
+        if (data[i].x >= radius) {
+            var x0 = data[i-1].x, y0 = data[i-1].y;
+            var x1 = data[i].x,   y1 = data[i].y;
+            if (x1 === x0) return y0;
+            var t = (radius - x0) / (x1 - x0);
+            return y0 + t * (y1 - y0);
+        }
+    }
+    return null;
+}
+
 function interpolateGfdAt(r, gfdData) {
     if (!gfdData || gfdData.length === 0) return null;
     if (r <= gfdData[0].x) return gfdData[0].y;
@@ -2812,6 +1210,7 @@ function interpolateGfdAt(r, gfdData) {
         if (gfdData[i].x >= r) {
             var x0 = gfdData[i - 1].x, y0 = gfdData[i - 1].y;
             var x1 = gfdData[i].x,     y1 = gfdData[i].y;
+            if (x1 === x0) return y0;
             var t = (r - x0) / (x1 - x0);
             return y0 + t * (y1 - y0);
         }
@@ -2819,10 +1218,6 @@ function interpolateGfdAt(r, gfdData) {
     return null;
 }
 
-/**
- * Compute fit quality metrics from observations vs GFD curve.
- * Returns {rms, chi2r, within1s, within2s, nObs, residuals[]}.
- */
 function computeFitMetrics(observations, gfdData) {
     if (!observations || observations.length === 0 || !gfdData || gfdData.length === 0) {
         return null;
@@ -2876,9 +1271,6 @@ function computeFitMetrics(observations, gfdData) {
     };
 }
 
-/**
- * Format a number in scientific notation like "1.23e10".
- */
 function fmtSci(val) {
     if (!val || val === 0) return '--';
     var exp = Math.floor(Math.log10(Math.abs(val)));
@@ -2886,9 +1278,6 @@ function fmtSci(val) {
     return coeff.toFixed(2) + 'e' + exp;
 }
 
-/**
- * Toggle a metrics section open/closed.
- */
 function toggleMetricsSection(headerEl) {
     var section = headerEl.parentElement;
     var body = headerEl.nextElementSibling;
@@ -2907,40 +1296,66 @@ function toggleMetricsSection(headerEl) {
 }
 
 /**
- * Update the right metrics panel with live data.
- * Called after every renderCurves() and chart update.
+ * Update the right metrics panel with client-computed fit quality
+ * for every theory curve vs observations.
  */
-function updateMetricsPanel(apiData) {
-    var gfdData = chart.data.datasets[1].data;
+function updateMetricsPanel() {
     var obs = pinnedObservations || (currentExample ? currentExample.observations : null);
 
-    // --- Fit Quality ---
-    var rmsEl = document.getElementById('metric-rms');
-    var chi2El = document.getElementById('metric-chi2');
-    var hits1El = document.getElementById('metric-hits-1s');
-    var hits2El = document.getElementById('metric-hits-2s');
+    var theories = [
+        { key: 'gfd',             label: 'GFD',              color: '#00E5A0', dsIndex: 1,  params: 0 },
+        { key: 'gfd_topological', label: 'GFD (Topological)',color: '#FF6D00', dsIndex: 13, params: 2 },
+        { key: 'newtonian',       label: 'Newtonian',        color: '#ff6b6b', dsIndex: 0,  params: 0 },
+        { key: 'mond',            label: 'MOND',             color: '#9966ff', dsIndex: 2,  params: 0 },
+        { key: 'cdm',             label: 'CDM+NFW',          color: '#ffffff', dsIndex: 7,  params: 1 },
+    ];
 
-    var metrics = computeFitMetrics(obs, gfdData);
-    if (metrics) {
-        rmsEl.textContent = metrics.rms.toFixed(1) + ' km/s';
-        rmsEl.className = 'metrics-value' + (metrics.rms < 10 ? ' good' : metrics.rms < 25 ? ' warn' : ' bad');
+    var tbody = document.getElementById('fit-compare-tbody');
+    if (!tbody) return;
 
-        chi2El.textContent = metrics.chi2r.toFixed(2);
-        chi2El.className = 'metrics-value' + (metrics.chi2r < 1.5 ? ' good' : metrics.chi2r < 3 ? ' warn' : ' bad');
-
-        hits1El.textContent = metrics.within1s + '/' + metrics.nObs;
-        hits1El.className = 'metrics-value' + (metrics.within1s / metrics.nObs >= 0.68 ? ' good' : ' warn');
-
-        hits2El.textContent = metrics.within2s + '/' + metrics.nObs;
-        hits2El.className = 'metrics-value' + (metrics.within2s / metrics.nObs >= 0.95 ? ' good' : ' warn');
+    if (!obs || obs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="color:#808080;text-align:center;padding:8px 0;">No observations</td></tr>';
     } else {
-        rmsEl.textContent = '--';  rmsEl.className = 'metrics-value';
-        chi2El.textContent = '--'; chi2El.className = 'metrics-value';
-        hits1El.textContent = '--'; hits1El.className = 'metrics-value';
-        hits2El.textContent = '--'; hits2El.className = 'metrics-value';
+        var bestRms = Infinity;
+        var results = [];
+        for (var i = 0; i < theories.length; i++) {
+            var t = theories[i];
+            var ds = chart.data.datasets[t.dsIndex];
+            if (!ds || !ds.data || ds.data.length === 0) {
+                results.push(null);
+                continue;
+            }
+            var m = computeFitMetrics(obs, ds.data);
+            results.push(m);
+            if (m && m.rms < bestRms) bestRms = m.rms;
+        }
+
+        var html = '';
+        for (var j = 0; j < theories.length; j++) {
+            var th = theories[j];
+            var m = results[j];
+            var isBest = m && Math.abs(m.rms - bestRms) < 0.01;
+            html += '<tr class="' + (isBest ? 'fc-best' : '') + '">';
+            html += '<td><span class="fc-swatch" style="background:' + th.color + '"></span>' + th.label;
+            if (th.params > 0) html += ' <span style="color:#808080;font-weight:400;font-size:0.85em;">(' + th.params + 'p)</span>';
+            html += '</td>';
+            if (m) {
+                var rmsCls = m.rms < 10 ? 'fc-good' : m.rms < 25 ? 'fc-warn' : 'fc-bad';
+                var chi2Cls = m.chi2r < 1.5 ? 'fc-good' : m.chi2r < 3 ? 'fc-warn' : 'fc-bad';
+                var s1Cls = (m.within1s / m.nObs >= 0.68) ? 'fc-good' : 'fc-warn';
+                var s2Cls = (m.within2s / m.nObs >= 0.95) ? 'fc-good' : 'fc-warn';
+                html += '<td class="' + rmsCls + '">' + m.rms.toFixed(1) + '</td>';
+                html += '<td class="' + chi2Cls + '">' + m.chi2r.toFixed(1) + '</td>';
+                html += '<td class="' + s1Cls + '">' + m.within1s + '/' + m.nObs + '</td>';
+                html += '<td class="' + s2Cls + '">' + m.within2s + '/' + m.nObs + '</td>';
+            } else {
+                html += '<td>--</td><td>--</td><td>--</td><td>--</td>';
+            }
+            html += '</tr>';
+        }
+        tbody.innerHTML = html;
     }
 
-    // --- Observation Summary ---
     var npEl = document.getElementById('metric-npoints');
     var rangeEl = document.getElementById('metric-radial-range');
     var errEl = document.getElementById('metric-mean-err');
@@ -2957,18 +1372,13 @@ function updateMetricsPanel(apiData) {
         errEl.textContent = '--';
     }
 
-    // --- Mass Model ---
     var mm = getMassModelFromSliders();
     var totalM = mm.bulge.M + mm.disk.M + mm.gas.M;
     var gasFrac = totalM > 0 ? (mm.gas.M / totalM * 100) : 0;
 
     document.getElementById('metric-total-mass').textContent = fmtSci(totalM) + ' M_sun';
     document.getElementById('metric-gas-frac').textContent = gasFrac.toFixed(1) + '%';
-    // NOTE: metric-field-origin and metric-field-horizon are written by
-    // updateRightPanel() which runs after this function and correctly
-    // uses inferredFieldGeometry when in observation mode.
 
-    // --- CDM Comparison ---
     var m200El = document.getElementById('metric-cdm-m200');
     var cEl = document.getElementById('metric-cdm-c');
     var r200El = document.getElementById('metric-cdm-r200');
@@ -2992,29 +1402,36 @@ function updateMetricsPanel(apiData) {
         paramsEl.textContent = '--';
     }
 
-    // --- Residuals Table ---
-    var tbody = document.getElementById('metrics-residuals-tbody');
-    if (tbody && metrics && metrics.residuals.length > 0) {
-        var html = '';
-        for (var i = 0; i < metrics.residuals.length; i++) {
-            var res = metrics.residuals[i];
-            var rowClass = '';
-            if (res.sigma !== null) {
-                if (res.sigma <= 1) rowClass = 'sigma-good';
-                else if (res.sigma <= 2) rowClass = 'sigma-warn';
-                else rowClass = 'sigma-bad';
+    var residualPanels = [
+        { datasetIdx: 1,  tbodyId: 'metrics-residuals-photometric-tbody' },
+        { datasetIdx: 13, tbodyId: 'metrics-residuals-topological-tbody' }
+    ];
+    for (var pi = 0; pi < residualPanels.length; pi++) {
+        var panel = residualPanels[pi];
+        var metrics = computeFitMetrics(obs, chart.data.datasets[panel.datasetIdx].data);
+        var tbody = document.getElementById(panel.tbodyId);
+        if (tbody && metrics && metrics.residuals.length > 0) {
+            var html = '';
+            for (var ri = 0; ri < metrics.residuals.length; ri++) {
+                var res = metrics.residuals[ri];
+                var rowClass = '';
+                if (res.sigma !== null) {
+                    if (res.sigma <= 1) rowClass = 'sigma-good';
+                    else if (res.sigma <= 2) rowClass = 'sigma-warn';
+                    else rowClass = 'sigma-bad';
+                }
+                html += '<tr class="' + rowClass + '">';
+                html += '<td>' + res.r.toFixed(1) + '</td>';
+                html += '<td>' + res.vObs.toFixed(0) + '</td>';
+                html += '<td>' + res.vGfd.toFixed(0) + '</td>';
+                html += '<td>' + (res.dv >= 0 ? '+' : '') + res.dv.toFixed(1) + '</td>';
+                html += '<td>' + (res.sigma !== null ? res.sigma.toFixed(1) : '--') + '</td>';
+                html += '</tr>';
             }
-            html += '<tr class="' + rowClass + '">';
-            html += '<td>' + res.r.toFixed(1) + '</td>';
-            html += '<td>' + res.vObs.toFixed(0) + '</td>';
-            html += '<td>' + res.vGfd.toFixed(0) + '</td>';
-            html += '<td>' + (res.dv >= 0 ? '+' : '') + res.dv.toFixed(1) + '</td>';
-            html += '<td>' + (res.sigma !== null ? res.sigma.toFixed(1) : '--') + '</td>';
-            html += '</tr>';
+            tbody.innerHTML = html;
+        } else if (tbody) {
+            tbody.innerHTML = '';
         }
-        tbody.innerHTML = html;
-    } else if (tbody) {
-        tbody.innerHTML = '';
     }
 }
 
@@ -3040,83 +1457,121 @@ function updateDisplays() {
 }
 
 // =====================================================================
-// EXAMPLES
+// GALAXY BROWSER
 // =====================================================================
 
-function updateExamplesDropdown() {
-    const dropdown = document.getElementById('examples-dropdown');
-    dropdown.innerHTML = '';
+var _galaxyBrowserSelectedId = null;
 
-    // Add placeholder
-    const placeholder = document.createElement('option');
-    placeholder.value = '0';
-    placeholder.textContent = 'Select a galaxy...';
-    dropdown.appendChild(placeholder);
+function renderGalaxyBrowser(filter) {
+    var listEl = document.getElementById('galaxy-browser-list');
+    var emptyEl = document.getElementById('galaxy-browser-empty');
+    var countEl = document.getElementById('galaxy-browser-count');
+    if (!listEl) return;
 
-    // Always use prediction galaxies (unified observation flow)
-    const galaxies = galaxyCatalog.prediction || [];
-    galaxies.forEach((galaxy, index) => {
-        const option = document.createElement('option');
-        option.value = String(index + 1);
-        option.textContent = galaxy.name;
-        dropdown.appendChild(option);
-    });
+    listEl.innerHTML = '';
+    var query = (filter || '').toLowerCase();
+    var matched = [];
+    for (var i = 0; i < galaxyCatalog.length; i++) {
+        var g = galaxyCatalog[i];
+        if (query && g.name.toLowerCase().indexOf(query) === -1 &&
+            g.id.toLowerCase().indexOf(query) === -1) continue;
+        matched.push(g);
+    }
 
-    dropdown.selectedIndex = 0;
+    if (countEl) {
+        countEl.textContent = (query ? matched.length + ' / ' : '') + galaxyCatalog.length;
+    }
+
+    if (matched.length === 0) {
+        emptyEl.style.display = 'block';
+        return;
+    }
+    emptyEl.style.display = 'none';
+
+    for (var j = 0; j < matched.length; j++) {
+        var entry = matched[j];
+        var li = document.createElement('li');
+        li.className = 'galaxy-browser-item' + (entry.id === _galaxyBrowserSelectedId ? ' selected' : '');
+        li.dataset.id = entry.id;
+        li.setAttribute('role', 'option');
+        li.setAttribute('tabindex', '0');
+
+        var idSpan = document.createElement('span');
+        idSpan.className = 'galaxy-browser-item-id';
+        idSpan.textContent = entry.id;
+        li.appendChild(idSpan);
+
+        var nameSpan = document.createElement('span');
+        nameSpan.className = 'galaxy-browser-item-name';
+        nameSpan.textContent = entry.name;
+        li.appendChild(nameSpan);
+
+        li.addEventListener('click', (function (gid) {
+            return function () { selectGalaxyById(gid); };
+        })(entry.id));
+
+        li.addEventListener('keydown', (function (gid) {
+            return function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectGalaxyById(gid); }
+            };
+        })(entry.id));
+
+        listEl.appendChild(li);
+    }
 }
 
-function loadExample() {
-    const dropdown = document.getElementById('examples-dropdown');
-    const selectedIndex = parseInt(dropdown.value, 10);
+function highlightGalaxyInBrowser(galaxyId) {
+    _galaxyBrowserSelectedId = galaxyId;
+    var items = document.querySelectorAll('.galaxy-browser-item');
+    for (var i = 0; i < items.length; i++) {
+        var isMatch = items[i].dataset.id === galaxyId;
+        items[i].classList.toggle('selected', isMatch);
+        items[i].setAttribute('aria-selected', isMatch ? 'true' : 'false');
+    }
+    var sel = document.querySelector('.galaxy-browser-item.selected');
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
 
-    if (selectedIndex === 0) {
-        currentExample = null;
-        pinnedObservations = null;
-        pinnedGalaxyLabel = null;
-        pinnedGalaxyExample = null;
-        sandboxResult = null;
-        navigateTo('charts', 'chart');
-        chart.options.plugins.title.text = 'Rotation Curve: Gravitational Theory Comparison';
-        chart.options.plugins.zoom.limits.x.min = 0;
-        chart.options.plugins.zoom.limits.x.max = 100;
-        chart.resetZoom();
-        updateChart();
+function initGalaxyBrowserSearch() {
+    var input = document.getElementById('galaxy-search-input');
+    if (!input) return;
+    input.addEventListener('input', function () {
+        renderGalaxyBrowser(input.value.trim());
+    });
+}
+
+async function selectGalaxyById(galaxyId) {
+    if (!galaxyId || isLoadingExample) return;
+    isLoadingExample = true;
+    highlightGalaxyInBrowser(galaxyId);
+
+    var example;
+    try {
+        example = await fetchGalaxyById(galaxyId);
+    } catch (err) {
+        console.error('Failed to load galaxy:', galaxyId, err);
+        isLoadingExample = false;
         return;
     }
 
-    isLoadingExample = true;
-
-    // Always use prediction galaxies (unified observation flow)
-    const galaxies = galaxyCatalog.prediction || [];
-    const example = galaxies[selectedIndex - 1];
-    if (!example) { isLoadingExample = false; return; }
-
-    // Reset to Mass Model mode when changing galaxy
     isAutoFitted = false;
-    inferredFieldGeometry = null;
-    currentMode = 'prediction';
-    document.querySelector('.mass-model-header-text').textContent = 'Mass Distribution';
-    hideAutoMapDiagnostics();
-    // Reset inference-mode UI
     velocityControl.style.display = 'none';
     inferenceResult.classList.remove('visible');
     var multiDiv = document.getElementById('multi-inference-result');
     if (multiDiv) multiDiv.style.display = 'none';
     setMassSliderEditable(true);
     unlockAllChips();
-    updateBandLabel();
+    hideAutoMapDiagnostics();
 
-    // Extract galaxy display name (strip mass info in parentheses)
-    const galaxyLabel = example.name.replace(/\s*\(.*\)/, '');
-    chart.options.plugins.title.text = galaxyLabel + ': GFD Velocity Curves';
+    var galaxyLabel = example.name.replace(/\s*\(.*\)/, '');
+    chart.options.plugins.title.text = galaxyLabel + ' Rotation Curve';
 
     chart.data.datasets[3].data = [];
     chart.data.datasets[3].hidden = true;
-    clearInferenceChart();
+    chart.data.datasets[6].data = [];
 
     currentExample = example;
 
-    // Pin observations so they survive slider adjustments
     var pinObs = example.observations;
     pinnedObservations = pinObs || null;
     pinnedGalaxyLabel = galaxyLabel;
@@ -3129,14 +1584,13 @@ function loadExample() {
 
     navigateTo('charts', 'chart');
 
-    // Set zoom limits based on observational data or distance
     var obsData = example.observations;
     if (obsData && obsData.length > 0) {
-        const obsRadii = obsData.map(obs => obs.r);
-        const minR = Math.min(...obsRadii);
-        const maxR = Math.max(...obsRadii);
-        const range = maxR - minR;
-        const padding = Math.max(5, range * 0.2);
+        var obsRadii = obsData.map(function (obs) { return obs.r; });
+        var minR = Math.min.apply(null, obsRadii);
+        var maxR = Math.max.apply(null, obsRadii);
+        var range = maxR - minR;
+        var padding = Math.max(5, range * 0.2);
         chart.options.plugins.zoom.limits.x.min = Math.max(0, minR - padding);
         chart.options.plugins.zoom.limits.x.max = Math.min(100, maxR + padding);
     } else {
@@ -3144,23 +1598,17 @@ function loadExample() {
         chart.options.plugins.zoom.limits.x.max = 100;
     }
 
-    // Sync mass distribution panel
     if (example.mass_model) {
         setMassModelSliders(example.mass_model);
     }
     updateMassModelDisplays();
 
-    // Sync galactic radius slider
     if (example.galactic_radius) {
         galacticRadiusSlider.value = example.galactic_radius;
         galacticRadiusValue.textContent = example.galactic_radius + ' kpc';
     }
 
-    // Set to auto mode: the backend computes Origin Throughput from
-    // gas leverage. No jumping since the first (and only) render uses
-    // the auto value. The slider syncs from the API response.
     isAutoThroughput = true;
-    inferenceNeeded = false;
     vortexAutoBtn.classList.add('active');
     vortexStrengthValue.textContent = 'auto';
 
@@ -3168,42 +1616,18 @@ function loadExample() {
     updateResetToPhotometricButton();
     updateDisplays();
 
-    // Render observations directly onto the chart
     var obsEnabled = isChipEnabled('observed');
     if (pinnedObservations && pinnedObservations.length > 0) {
-        chart.data.datasets[3].data = pinnedObservations.map(function(obs) {
+        chart.data.datasets[3].data = pinnedObservations.map(function (obs) {
             return { x: obs.r, y: obs.v, err: obs.err || 0 };
         });
         chart.data.datasets[3].hidden = !obsEnabled;
-        chart.data.datasets[3].errorBars = pinnedObservations.map(function(obs) {
+        chart.data.datasets[3].errorBars = pinnedObservations.map(function (obs) {
             return obs.err || 0;
         });
     }
 
-    // Phase 1: fast photometric (mass model only, instant)
-    // Phase 2: observation fits (GFD Sigma + Accel, ~2-3s, background)
-    // Also fetch rotation curve for Newton/MOND/CDM so researchers can toggle them on.
-    if (example.id) {
-        var massModel = getMassModelFromSliders();
-        var predObs = example.observations || [];
-        var predMaxR = parseFloat(distanceSlider.value);
-        if (predObs.length > 0) {
-            var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
-            predMaxR = Math.max(predMaxR, maxObsR * 1.15);
-        }
-        var gr = example.galactic_radius ? parseFloat(example.galactic_radius) : parseFloat(distanceSlider.value);
-        fetchPhotometricData(example.id).then(function() {
-            hideResetButton();
-            isLoadingExample = false;
-            massModelManuallyModified = false;
-            updateResetToPhotometricButton();
-            fetchObservationData(example.id);
-            // Theory curves (newtonian, mond, cdm) come from rotation photometric-curve
-            // and are applied in renderSandboxCurves; no separate fetchRotationCurve needed.
-            if (typeof updateCdmHaloPanel === 'function') updateCdmHaloPanel();
-            chart.update('none');
-        });
-    } else {
+    if (!example.id) {
         chart.update('none');
         chart.resetZoom();
         hideResetButton();
@@ -3214,29 +1638,16 @@ function loadExample() {
 // =====================================================================
 // ANALYSIS VIEW STATE AND NAVIGATION PIPELINE
 // =====================================================================
-// Single source of truth for what is shown in left panel, right panel (tabs + content).
-// All tab clicks and programmatic view changes go through navigateTo().
-//
-// Contract: for any (rightPanelTab, chartsSubmenuTab),
-//   - Left panel:  mass-model-panel only for Charts+Mass model; else observation-mass-panel (read-only).
-//   - Right panel: one of [Charts tab content | Chart Data tab content].
-//   - If Charts: submenu visible when galaxy loaded; one of [chart container | vortex face | field-analysis face].
-//   - Chart state (GFD chips, VPS, datasets) is applied by applyMassModelChartState or applyObservationChartState.
-// Adding a new right-panel tab or Charts submenu: extend navigateTo() and analysisViewState.
-// =====================================================================
 
-/** Current analysis view: right-panel tab and Charts submenu tab. */
 var analysisViewState = {
     rightPanelTab: 'charts',
     chartsSubmenuTab: 'chart'
 };
 
 /**
- * Navigate to a view. Single pipeline for tab switches; determines left panel,
- * right panel tab content, and chart/submenu state. Call this from tab clicks
- * and when loading or clearing a galaxy.
+ * Navigate to a view. Single pipeline for tab switches.
  * @param {string} rightPanelTab - 'charts' | 'chart-data'
- * @param {string} [chartsSubmenuTab] - 'chart' | 'obs-chart' | 'vortex' | 'field-analysis' (only when rightPanelTab === 'charts')
+ * @param {string} [chartsSubmenuTab] - 'chart' | 'obs-chart' | 'vortex'
  */
 function navigateTo(rightPanelTab, chartsSubmenuTab) {
     if (!rightPanelTab) return;
@@ -3262,23 +1673,16 @@ function navigateTo(rightPanelTab, chartsSubmenuTab) {
     var contents = document.querySelectorAll('.right-panel-tab-content');
     var theoryToggles = document.getElementById('theory-toggles');
     var chartContainer = document.querySelector('.chart-container');
-    var obsFace = document.getElementById('obs-data-face');
     var vortexFace = document.getElementById('vortex-face');
     var fieldFace = document.getElementById('field-analysis-face');
 
-    // ----- Left panel -----
+    // Left panel
     if (massModelPanel && obsMassPanel) {
-        if (rpTab === 'charts' && csTab === 'chart') {
-            massModelPanel.style.display = '';
-            obsMassPanel.style.display = 'none';
-        } else {
-            obsMassPanel.style.display = '';
-            massModelPanel.style.display = 'none';
-            if (rpTab === 'charts') populateObservationMassPanel();
-        }
+        massModelPanel.style.display = '';
+        obsMassPanel.style.display = 'none';
     }
 
-    // ----- Right panel: which tab content is visible -----
+    // Right panel: which tab content is visible
     if (rightPanelTabs) {
         var tabs = rightPanelTabs.querySelectorAll('.right-panel-tab');
         tabs.forEach(function(t) {
@@ -3290,7 +1694,7 @@ function navigateTo(rightPanelTab, chartsSubmenuTab) {
         el.style.display = contentId === rpTab ? '' : 'none';
     });
 
-    // ----- Right panel: Charts submenu and main content -----
+    // Charts submenu
     var hasGalaxy = !!(currentExample || pinnedGalaxyExample || (pinnedObservations && pinnedObservations.length > 0));
     if (tabBar) {
         tabBar.style.display = rpTab === 'charts' && hasGalaxy ? '' : 'none';
@@ -3304,7 +1708,6 @@ function navigateTo(rightPanelTab, chartsSubmenuTab) {
 
     if (theoryToggles) theoryToggles.style.display = 'none';
     if (chartContainer) chartContainer.style.display = 'none';
-    if (obsFace) obsFace.style.display = 'none';
     if (vortexFace) vortexFace.style.display = 'none';
     if (fieldFace) fieldFace.style.display = 'none';
     if (rightPanel) rightPanel.classList.remove('obs-data-active');
@@ -3317,83 +1720,60 @@ function navigateTo(rightPanelTab, chartsSubmenuTab) {
         return;
     }
 
-    // rpTab === 'charts': show the active Charts submenu content
+    // Charts submenu content
     if (csTab === 'chart') {
         if (theoryToggles) theoryToggles.style.display = '';
         if (chartContainer) chartContainer.style.display = '';
         applyMassModelChartState();
     } else if (csTab === 'obs-chart') {
-        if (theoryToggles) theoryToggles.style.display = '';
         if (chartContainer) chartContainer.style.display = '';
-        applyObservationChartState();
+        showPlaceholder('Observations chart: coming soon');
     } else if (csTab === 'vortex') {
-        if (vortexFace) vortexFace.style.display = '';
+        if (vortexFace) {
+            vortexFace.style.display = '';
+            vortexFace.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#606060;font-size:1.1em;">Vortex analysis: coming soon</div>';
+        }
         if (rightPanel) rightPanel.classList.add('obs-data-active');
-        loadVortexTab(vortexCurrentVariance);
-    } else if (csTab === 'field-analysis') {
-        if (fieldFace) fieldFace.style.display = '';
-        if (rightPanel) rightPanel.classList.add('obs-data-active');
-        loadFieldAnalysis();
     }
 }
 
+function showPlaceholder(message) {
+    chart.data.datasets.forEach(function(ds) { ds.data = []; });
+    chart.options.plugins.title.text = message;
+    chart.update('none');
+}
+
 /**
- * Chart-only state for Mass Model view (GFD Photometric, no VPS). No panel visibility.
+ * Chart state for Mass Model view. Fetches from /api/rotation/charts/mass_model.
  */
-function applyMassModelChartState() {
+async function applyMassModelChartState() {
     isAutoFitted = false;
     var vpsPanel = document.getElementById('vps-panel');
     if (vpsPanel) vpsPanel.style.display = 'none';
     updateResetToPhotometricButton();
     var gfdVelChip = document.querySelector('.theory-chip[data-series="gfd_velocity"]');
     if (gfdVelChip) gfdVelChip.style.display = 'none';
-    if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
-        chart.data.datasets[8].hidden = true;
-        chart.data.datasets[10].hidden = true;
-        chart.data.datasets[11].hidden = true;
-    }
+    var gfdDecodeChip = document.querySelector('.theory-chip[data-series="gfd_sst_velocity_decode"]');
+    if (gfdDecodeChip) gfdDecodeChip.style.display = 'none';
     blankRightPaneMetrics();
-    renderSandboxCurves();
-}
-
-/**
- * Chart-only state for Observations view (GFD Observed, VPS). No panel visibility.
- */
-async function applyObservationChartState() {
-    isAutoFitted = true;
-    var gfdVelChip = document.querySelector('.theory-chip[data-series="gfd_velocity"]');
-    if (gfdVelChip) gfdVelChip.style.display = '';
-    var hasObsData = sandboxResult && sandboxResult.chart &&
-        sandboxResult.chart.gfd_spline &&
-        sandboxResult.chart.gfd_spline.length > 0;
-    if (!hasObsData && observationFetchPromise) {
+    var example = pinnedGalaxyExample || currentExample;
+    var galaxyId = example && example.id ? example.id : null;
+    if (galaxyId) {
         showChartLoading();
-        await observationFetchPromise;
+        await fetchMassModelChart(galaxyId);
         hideChartLoading();
     }
-    if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
-        chart.data.datasets[10].hidden = true;
-        chart.data.datasets[11].hidden = false;
-    }
-    var vpsPanel = document.getElementById('vps-panel');
-    if (vpsPanel) vpsPanel.style.display = '';
-    ensureVpsChart();
-    blankRightPaneMetrics();
-    renderSandboxCurves();
-    updateVpsChart();
+    applyMassModelChartFromApi(massModelChartData);
+    isLoadingExample = false;
+    massModelManuallyModified = false;
+    hideResetButton();
+    updateResetToPhotometricButton();
 }
 
 // =====================================================================
-// VIEW MODE TOGGLE (legacy)
+// RIGHT PANEL TABS
 // =====================================================================
 
-function initViewModeToggle() {
-    // No-op: view-mode toggle removed; navigation goes through navigateTo().
-}
-
-/**
- * Top-level right-panel tabs (Charts | Chart Data). All view changes go through navigateTo().
- */
 function initRightPanelTabs() {
     var tabContainer = document.getElementById('right-panel-tabs');
     if (!tabContainer) return;
@@ -3407,45 +1787,7 @@ function initRightPanelTabs() {
 }
 
 /**
- * Switch to Observation view. Delegates to central pipeline (panels + chart state).
- */
-function enterObservationMode() {
-    navigateTo('charts', 'obs-chart');
-}
-
-/**
- * Switch to Mass Model view. Delegates to central pipeline (panels + chart state).
- */
-function enterMassModelMode() {
-    navigateTo('charts', 'chart');
-}
-
-/**
- * Legacy entry point kept for backward compatibility (global onclick).
- * Toggles between Mass Model and Observation modes.
- */
-function runAutoFit() {
-    if (isAutoFitted) {
-        enterMassModelMode();
-    } else {
-        enterObservationMode();
-    }
-}
-
-/**
- * Reset the view-mode toggle to Mass Model (default). Called when
- * loading a new galaxy or when sliders are manually adjusted.
- */
-function resetViewModeToggle() {
-    navigateTo('charts', 'chart');
-}
-
-// =====================================================================
-// OBSERVATION DATA TABS (Chart | Observation Data)
-// =====================================================================
-
-/**
- * Charts submenu (Mass model | Observations | Vortex). All view changes go through navigateTo().
+ * Charts submenu (Mass model | Observations | Vortex).
  */
 function initObsTabs() {
     var tabBar = document.getElementById('obs-tab-bar');
@@ -3459,399 +1801,10 @@ function initObsTabs() {
     });
 }
 
-function isVortexChipEnabled(seriesKey) {
-    var face = document.getElementById('vortex-face');
-    if (!face) return true;
-    var chip = face.querySelector('.theory-chip[data-series="' + seriesKey + '"]');
-    if (!chip) return true;
-    var cb = chip.querySelector('input[type="checkbox"]');
-    return cb ? cb.checked : true;
-}
-
-var vortexChipToDatasetIndex = { vortex_raw: 0, vortex_smooth: 1, vortex_observed: 2, vortex_mond: 3, vortex_cdm: 4, vortex_gfd: 5, vortex_decode: 6 };
-
-function initVortexChipListeners() {
-    var container = document.getElementById('vortex-theory-toggles');
-    if (!container) return;
-    var bound = container.getAttribute('data-vortex-listeners');
-    if (bound === '1') return;
-    container.setAttribute('data-vortex-listeners', '1');
-    container.addEventListener('click', function(ev) {
-        var chip = ev.target.closest('.theory-chip[data-series^="vortex_"]');
-        if (!chip) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        var key = chip.getAttribute('data-series');
-        var cb = chip.querySelector('input[type="checkbox"]');
-        var dsIdx = vortexChipToDatasetIndex[key];
-        if (!cb || dsIdx === undefined) return;
-        cb.checked = !cb.checked;
-        chip.classList.toggle('active', cb.checked);
-        if (vortexChartAInstance && vortexChartAInstance.data && vortexChartAInstance.data.datasets[dsIdx]) {
-            vortexChartAInstance.data.datasets[dsIdx].hidden = !cb.checked;
-            vortexChartAInstance.update('none');
-        }
-    }, true);
-}
-
-function syncVortexChipActiveState() {
-    var face = document.getElementById('vortex-face');
-    if (!face) return;
-    var chips = face.querySelectorAll('.theory-chip[data-series^="vortex_"]');
-    for (var i = 0; i < chips.length; i++) {
-        var chip = chips[i];
-        var cb = chip.querySelector('input[type="checkbox"]');
-        if (cb) chip.classList.toggle('active', cb.checked);
-    }
-}
-
-/**
- * Load Vortex tab data (figure-a, figure-b, and bridged theory curves).
- * Fetches vortex-mode rotation and photometric so GFD (Photometric), MOND, CDM
- * are symmetric (no spurious dip for r < 0).
- */
-function loadVortexTab(variancePct) {
-    var example = pinnedGalaxyExample || currentExample;
-    var galaxyId = example && example.id ? example.id : null;
-    if (!galaxyId) {
-        lastVortexRotationData = null;
-        lastVortexPhotometricData = null;
-        lastVortexV2Data = null;
-        renderVortexCharts(null, null);
-        return;
-    }
-    var body = JSON.stringify({ galaxy_id: galaxyId, variance_pct: variancePct });
-    var massModel = getMassModelFromSliders();
-    var predObs = pinnedObservations || (example && example.observations) || [];
-    var predMaxR = parseFloat(distanceSlider.value);
-    if (predObs.length > 0) {
-        var maxObsR = Math.max.apply(null, predObs.map(function(o) { return o.r; }));
-        predMaxR = Math.max(predMaxR, maxObsR * 1.15);
-    }
-    var gr = (example && example.galactic_radius) ? parseFloat(example.galactic_radius) : parseFloat(distanceSlider.value);
-    var accelRatio = parseFloat(accelSlider.value);
-
-    var v2Body = JSON.stringify({ galaxy_id: galaxyId, num_points: 500, max_radius: predMaxR, accel_ratio: accelRatio, deflection_smoothing_pct: 6.2, include_inferred: false });
-    Promise.all([
-        fetch('/api/vortex/figure-a', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body }).then(function(r) { return r.ok ? r.json() : null; }),
-        fetch('/api/vortex/figure-b', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body }).then(function(r) { return r.ok ? r.json() : null; }),
-        fetchRotationCurve(predMaxR, accelRatio, massModel, predObs, gr, 'default').then(function(d) { return d; }).catch(function() { return null; }),
-        fetchPhotometricData(galaxyId, 'vortex_chart', predMaxR).then(function(d) { return d; }).catch(function() { return null; }),
-        fetch('/api/rotation/gfd-velocity-curve-v2', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: v2Body }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
-    ]).then(function(results) {
-        lastVortexRotationData = results[2] || null;
-        lastVortexPhotometricData = results[3] || null;
-        lastVortexV2Data = results[4] || null;
-        renderVortexCharts(results[0], results[1]);
-    }).catch(function() {
-        lastVortexRotationData = null;
-        lastVortexPhotometricData = null;
-        lastVortexV2Data = null;
-        renderVortexCharts(null, null);
-    });
-}
-
-/**
- * Render or clear Figure 1a and Figure 1b vortex charts.
- * figA: { figure_a: { chart1, chart2 } }; figB: { figure_b: { chart1, chart2 } }.
- */
-function renderVortexCharts(figA, figB) {
-    var canvasA = document.getElementById('vortexChartA');
-    var canvasB = document.getElementById('vortexChartB');
-    if (!canvasA || !canvasB) return;
-
-    if (vortexChartAInstance) {
-        vortexChartAInstance.destroy();
-        vortexChartAInstance = null;
-    }
-    if (vortexChartBInstance) {
-        vortexChartBInstance.destroy();
-        vortexChartBInstance = null;
-    }
-
-    if (!figA || !figA.figure_a || !figB || !figB.figure_b) {
-        if (vortexChartAInstance) { vortexChartAInstance.destroy(); vortexChartAInstance = null; }
-        if (vortexChartBInstance) { vortexChartBInstance.destroy(); vortexChartBInstance = null; }
-        var msg = document.getElementById('vortex-message');
-        if (msg) {
-            msg.style.display = '';
-            msg.textContent = 'Select an observation to load data.';
-        }
-        return;
-    }
-    var msg = document.getElementById('vortex-message');
-    if (msg) msg.style.display = 'none';
-
-    var c1 = figA.figure_a.chart1;
-    var c2 = figA.figure_a.chart2;
-    var radii = c1.radii || [];
-    var vRaw = c1.v_raw || [];
-    var vFv = c2.v_fv || [];
-    var obsR = c1.obs_r || [];
-    var obsV = c1.obs_v || [];
-    var obsErr = c1.obs_err || [];
-
-    var rawPoints = radii.map(function(r, i) { return { x: r, y: vRaw[i] }; });
-    var fvPoints = radii.map(function(r, i) {
-        var y = vFv[i];
-        return (y != null && typeof y === 'number') ? { x: r, y: y } : null;
-    }).filter(function(p) { return p !== null; });
-    var obsPoints = obsR.map(function(r, i) { return { x: r, y: obsV[i] }; });
-
-    function mirrorCurveForVortex(points) {
-        if (!points || points.length === 0) return [];
-        var out = [];
-        for (var i = 0; i < points.length; i++) {
-            var p = points[i];
-            if (p.x > 0) out.push({ x: -p.x, y: p.y });
-        }
-        for (var j = 0; j < points.length; j++) out.push({ x: points[j].x, y: points[j].y });
-        out.sort(function(a, b) { return a.x - b.x; });
-        return out;
-    }
-    function seriesToPoints(radii, vals) {
-        if (!radii || !vals || radii.length !== vals.length) return [];
-        return radii.map(function(r, i) { return { x: r, y: vals[i] }; });
-    }
-    var gfdData = [];
-    if (lastVortexPhotometricData && lastVortexPhotometricData.chart && lastVortexPhotometricData.chart.radii && lastVortexPhotometricData.chart.gfd_photometric) {
-        var pr = lastVortexPhotometricData.chart.radii;
-        var pv = lastVortexPhotometricData.chart.gfd_photometric;
-        if (pr.length === pv.length && pr.length > 0) gfdData = seriesToPoints(pr, pv);
-    }
-    if (gfdData.length === 0 && chart && chart.data && chart.data.datasets[1] && chart.data.datasets[1].data) {
-        gfdData = chart.data.datasets[1].data.slice();
-    }
-    var decodePoints = [];
-    if (c2.gfd_sst_velocity_decode && radii.length === (c2.gfd_sst_velocity_decode || []).length) {
-        decodePoints = radii.map(function(r, i) {
-            var y = c2.gfd_sst_velocity_decode[i];
-            return (y != null && typeof y === 'number') ? { x: r, y: y } : null;
-        }).filter(function(p) { return p !== null; });
-    }
-    var mondData = [];
-    var cdmData = [];
-    if (lastVortexPhotometricData && lastVortexPhotometricData.chart && lastVortexPhotometricData.chart.radii) {
-        var pr = lastVortexPhotometricData.chart.radii;
-        if (lastVortexPhotometricData.chart.mond_photometric && pr.length === lastVortexPhotometricData.chart.mond_photometric.length) {
-            mondData = seriesToPoints(pr, lastVortexPhotometricData.chart.mond_photometric);
-        }
-        if (lastVortexPhotometricData.chart.cdm_photometric && pr.length === lastVortexPhotometricData.chart.cdm_photometric.length) {
-            cdmData = seriesToPoints(pr, lastVortexPhotometricData.chart.cdm_photometric);
-        }
-    }
-    if (mondData.length === 0 && lastVortexRotationData && lastVortexRotationData.radii && lastVortexRotationData.radii.length > 0) {
-        var rr = lastVortexRotationData.radii;
-        if (lastVortexRotationData.mond) mondData = seriesToPoints(rr, lastVortexRotationData.mond);
-    }
-    if (cdmData.length === 0 && lastVortexRotationData && lastVortexRotationData.radii && lastVortexRotationData.cdm) {
-        cdmData = seriesToPoints(lastVortexRotationData.radii, lastVortexRotationData.cdm);
-    }
-    if (mondData.length === 0 && chart && chart.data && chart.data.datasets[2] && chart.data.datasets[2].data) {
-        mondData = mirrorCurveForVortex(chart.data.datasets[2].data);
-    }
-    if (cdmData.length === 0 && chart && chart.data && chart.data.datasets[7] && chart.data.datasets[7].data) {
-        cdmData = mirrorCurveForVortex(chart.data.datasets[7].data);
-    }
-
-    var vortexDs = [
-        { label: 'GFD (Velocity raw)', data: rawPoints, borderColor: '#888', borderDash: [4, 4], borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_raw') },
-        { label: 'GFD (Velocity smooth)', data: fvPoints, borderColor: '#aa44ff', borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_smooth') },
-        { label: 'Observed', data: obsPoints, borderColor: '#FFC107', backgroundColor: '#FFC107', pointRadius: 5, showLine: false, hidden: !isVortexChipEnabled('vortex_observed') },
-        { label: 'MOND', data: mondData, borderColor: '#9966ff', borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_mond') },
-        { label: 'CDM', data: cdmData, borderColor: '#ffffff', borderWidth: 2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_cdm') },
-        { label: 'GFD (Photometric)', data: gfdData, borderColor: 'rgba(0, 229, 160, 0.9)', backgroundColor: 'transparent', borderDash: [8, 4], borderWidth: 2, tension: 0.3, showLine: true, pointRadius: 0, pointHoverRadius: 0, pointStyle: 'circle', pointBackgroundColor: 'rgba(0, 229, 160, 0)', pointBorderColor: 'rgba(0, 229, 160, 0)', pointBorderWidth: 0, hidden: !isVortexChipEnabled('vortex_gfd') },
-        { label: 'GFD velocity decode (no mass input)', data: decodePoints, borderColor: '#1E88E5', borderWidth: 2.2, tension: 0.3, pointRadius: 0, hidden: !isVortexChipEnabled('vortex_decode') }
-    ];
-
-    vortexChartAInstance = new Chart(canvasA.getContext('2d'), {
-        type: 'line',
-        data: {
-            datasets: vortexDs
-        },
-        plugins: [{
-            id: 'vortexLockScale',
-            afterUpdate: function(chart) {
-                if (chart._vortexScaleLocked) return;
-                var sx = chart.scales.x;
-                var sy = chart.scales.y;
-                if (!sx || !sy) return;
-                chart.options.scales.x.min = sx.min;
-                chart.options.scales.x.max = sx.max;
-                chart.options.scales.y.min = sy.min;
-                chart.options.scales.y.max = sy.max;
-                chart._vortexScaleLocked = true;
-            }
-        }],
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            plugins: {
-                legend: { display: false },
-                title: { display: true, text: 'GFD Velocity Field: Covariant Action Applied to Observed Kinematics', color: '#e0e0e0', font: { size: 16, weight: '500' } }
-            },
-            scales: {
-                x: { type: 'linear', title: { display: true, text: 'Galactocentric radius r (kpc)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } },
-                y: { type: 'linear', title: { display: true, text: 'v(r) [km/s]' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } }
-            }
-        }
-    });
-    initVortexChipListeners();
-    syncVortexChipActiveState();
-
-    var b1 = figB.figure_b.chart1;
-    var b2 = figB.figure_b.chart2;
-    var rKpc1 = b1.r_kpc || [];
-    var ratio1 = b1.ratio_T || [];
-    var rKpc2 = b2.r_kpc || [];
-    var ratio2 = b2.ratio_T || [];
-
-    var line1 = rKpc1.map(function(r, i) { return { x: r, y: ratio1[i] }; });
-    var line2 = rKpc2.map(function(r, i) { return { x: r, y: ratio2[i] }; });
-
-    vortexChartBInstance = new Chart(canvasB.getContext('2d'), {
-        type: 'line',
-        data: {
-            datasets: [
-                { label: 'Observed rotation curve vs GFD (Photometric mass model)', data: line1, borderColor: '#2e7d32', borderDash: [4, 4], borderWidth: 2, tension: 0.3, pointRadius: 0 },
-                { label: 'GFD Velocity Field (smoothed) vs GFD (Photometric mass model)', data: line2, borderColor: '#1565c0', borderWidth: 2, tension: 0.3, pointRadius: 0 }
-            ]
-        },
-        plugins: [{
-            id: 'vortexLockScaleB',
-            afterUpdate: function(chart) {
-                if (chart._vortexScaleLocked) return;
-                var sx = chart.scales.x;
-                var sy = chart.scales.y;
-                if (!sx || !sy) return;
-                chart.options.scales.x.min = sx.min;
-                chart.options.scales.x.max = sx.max;
-                chart.options.scales.y.min = sy.min;
-                chart.options.scales.y.max = sy.max;
-                chart._vortexScaleLocked = true;
-            }
-        }],
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            plugins: {
-                legend: { display: true, position: 'top' },
-                title: { display: true, text: 'GFD Velocity Field vs GFD (Photometric mass model)', color: '#e0e0e0', font: { size: 16, weight: '500' } }
-            },
-            scales: {
-                x: { type: 'linear', title: { display: true, text: 'Galactocentric radius (kpc)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' } },
-                y: { type: 'linear', title: { display: true, text: 'Mass ratio T(r) (derived / photometric)' }, grid: { color: 'rgba(64,64,64,0.3)' }, ticks: { color: '#b0b0b0' }, min: 0 }
-            }
-        }
-    });
-}
-
-/**
- * Show the observation tab bar and populate the observation data content.
- * Renders a markdown-preview style layout grouped by data source.
- * Called when entering Observation mode.
- */
-function showObsTabs() {
-    var tabBar = document.getElementById('obs-tab-bar');
-    if (tabBar) tabBar.style.display = '';
-
-    var container = document.getElementById('obs-data-content');
-    if (!container) return;
-
-    var obs = pinnedObservations;
-    var example = pinnedGalaxyExample || currentExample;
-    var galaxyName = example ? example.name.replace(/\s*\(.*\)/, '') : 'Galaxy';
-
-    if (!obs || obs.length === 0) {
-        container.innerHTML = '<p style="color:#606060;">No observation data available.</p>';
-        return;
-    }
-
-    // Group observations by source. Use obs.src if present, otherwise
-    // derive a default from the galaxy's first reference.
-    var groups = [];
-    var groupMap = {};
-    var defaultSrc = 'Published data';
-    if (example && example.references && example.references.length > 0) {
-        // Extract short author+year from the first rotation curve reference
-        defaultSrc = example.references[0];
-    }
-
-    for (var i = 0; i < obs.length; i++) {
-        var src = obs[i].src || defaultSrc;
-        if (!groupMap[src]) {
-            groupMap[src] = { src: src, points: [] };
-            groups.push(groupMap[src]);
-        }
-        groupMap[src].points.push(obs[i]);
-    }
-
-    // Build markdown-preview style HTML
-    var html = '';
-    html += '<h2>' + galaxyName + '</h2>';
-    html += '<div class="obs-summary">' + obs.length + ' observations across '
-          + groups.length + ' source' + (groups.length > 1 ? 's' : '') + '</div>';
-
-    for (var g = 0; g < groups.length; g++) {
-        var grp = groups[g];
-        var radii = grp.points.map(function(p) { return p.r; });
-        var minR = Math.min.apply(null, radii).toFixed(1);
-        var maxR = Math.max.apply(null, radii).toFixed(1);
-
-        html += '<div class="obs-source-group">';
-        html += '<h3>' + grp.src + '</h3>';
-        html += '<div class="obs-source-meta">'
-              + grp.points.length + ' point' + (grp.points.length > 1 ? 's' : '')
-              + ', ' + minR + ' \u2013 ' + maxR + ' kpc</div>';
-
-        html += '<table class="obs-data-table">';
-        html += '<thead><tr>'
-              + '<th>r (kpc)</th>'
-              + '<th>v (km/s)</th>'
-              + '<th>err (km/s)</th>'
-              + '</tr></thead><tbody>';
-
-        for (var p = 0; p < grp.points.length; p++) {
-            var pt = grp.points[p];
-            html += '<tr>';
-            html += '<td>' + pt.r.toFixed(1) + '</td>';
-            html += '<td>' + pt.v.toFixed(0) + '</td>';
-            html += '<td>' + (pt.err != null ? pt.err.toFixed(0) : '--') + '</td>';
-            html += '</tr>';
-        }
-
-        html += '</tbody></table>';
-        html += '</div>';
-    }
-
-    // References at the bottom
-    if (example && example.references && example.references.length > 0) {
-        html += '<div class="obs-refs-section">';
-        html += '<h4>References</h4>';
-        for (var j = 0; j < example.references.length; j++) {
-            html += '<div>' + example.references[j] + '</div>';
-        }
-        html += '</div>';
-    }
-
-    container.innerHTML = html;
-}
-
-/**
- * Hide Charts submenu and show chart view. Delegates to pipeline (e.g. when no galaxy).
- */
-function hideObsTabs() {
-    navigateTo('charts', 'chart');
-    _fieldAnalysisLoaded = false;
-}
-
 // =====================================================================
-// CHART DATA TAB (all data used to render the chart, exportable)
+// CHART DATA TAB
 // =====================================================================
 
-/** Build CSV string from rows and headers. */
 function tableToCSV(headers, rows) {
     var lines = [headers.join(',')];
     rows.forEach(function(row) {
@@ -3860,15 +1813,14 @@ function tableToCSV(headers, rows) {
     return lines.join('\n');
 }
 
-/** Build full chart data payload for JSON export. */
 function chartDataToJSON() {
     var out = { metadata: {}, mass_model: null, observational_data: [], series: {} };
     var example = currentExample || pinnedGalaxyExample;
     var galaxyName = example ? example.name.replace(/\s*\(.*\)/, '') : 'Galaxy';
     out.metadata.galaxy = galaxyName;
-    out.metadata.R_HI_kpc = (sandboxResult && sandboxResult.sparc_r_hi_kpc != null) ? sandboxResult.sparc_r_hi_kpc : null;
-    out.metadata.mass_model_source = (sandboxResult && sandboxResult.gfd_source === 'manual') ? 'Manual' : 'Photometric';
-    var pm = sandboxResult && sandboxResult.photometric_mass_model;
+    out.metadata.R_HI_kpc = (massModelChartData && massModelChartData.sparc_r_hi_kpc != null) ? massModelChartData.sparc_r_hi_kpc : null;
+    out.metadata.mass_model_source = massModelManuallyModified ? 'Manual' : 'Photometric';
+    var pm = massModelChartData && massModelChartData.photometric_mass_model;
     if (pm) {
         var gasM = pm.gas ? pm.gas.M : 0, gasRd = pm.gas ? pm.gas.Rd : 0;
         var diskM = pm.disk ? pm.disk.M : 0, diskRd = pm.disk ? pm.disk.Rd : 0;
@@ -3881,8 +1833,8 @@ function chartDataToJSON() {
             return { r_kpc: Math.round(o.r * 100) / 100, v_km_s: Math.round((o.v || 0) * 100) / 100, err_km_s: (o.err != null) ? Math.round(o.err * 100) / 100 : null };
         });
     }
-    var seriesIndices = [0, 1, 2, 3, 7, 11, 12];
-    var seriesKeys = ['newtonian', 'gfd_photometric', 'mond', 'observed', 'cdm', 'gfd_velocity', 'gfd_sst_velocity_decode'];
+    var seriesIndices = [0, 1, 2, 3, 7];
+    var seriesKeys = ['newtonian', 'gfd_photometric', 'mond', 'observed', 'cdm'];
     if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
         for (var s = 0; s < seriesIndices.length; s++) {
             var idx = seriesIndices[s];
@@ -3904,7 +1856,6 @@ function chartDataToJSON() {
     return out;
 }
 
-/** Copy table CSV to clipboard; el is the container that holds a table, or a data-table id. */
 function copyTableCSV(el) {
     var table = typeof el === 'string' ? document.getElementById(el) : el;
     if (!table) return;
@@ -3920,11 +1871,10 @@ function copyTableCSV(el) {
     });
     var csv = tableToCSV(headers, rows);
     if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(csv).then(function() { /* done */ }).catch(function() {});
+        navigator.clipboard.writeText(csv).then(function() {}).catch(function() {});
     }
 }
 
-/** Download CSV with given filename. */
 function downloadCSV(csv, filename) {
     var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     var a = document.createElement('a');
@@ -3934,7 +1884,6 @@ function downloadCSV(csv, filename) {
     URL.revokeObjectURL(a.href);
 }
 
-/** Download full chart data as JSON. */
 function downloadChartDataJSON() {
     var json = chartDataToJSON();
     var str = JSON.stringify(json, null, 2);
@@ -3947,47 +1896,39 @@ function downloadChartDataJSON() {
     URL.revokeObjectURL(a.href);
 }
 
-/** Toggle collapsible section. */
 function toggleChartDataSection(headerEl) {
     var section = headerEl.closest('.chart-data-section');
     if (section) section.classList.toggle('chart-data-section-collapsed');
 }
 
-/**
- * Populate the Chart Data tab with metadata, mass model, observational data,
- * and one table per plot series (Observed, GFD Photometric, Newtonian, MOND, CDM, GFD Observed).
- * Lazy-called when the user switches to the Chart Data tab.
- */
 function renderChartDataTab() {
     var container = document.getElementById('chart-data-content');
     if (!container) return;
 
     var example = currentExample || pinnedGalaxyExample;
     var galaxyName = example ? example.name.replace(/\s*\(.*\)/, '') : 'Galaxy';
-    var pm = sandboxResult && sandboxResult.photometric_mass_model;
+    var pm = massModelChartData && massModelChartData.photometric_mass_model;
     var hasObs = pinnedObservations && pinnedObservations.length > 0;
 
-    if (!example && !sandboxResult && (typeof chart === 'undefined' || !chart)) {
+    if (!example && !massModelChartData && (typeof chart === 'undefined' || !chart)) {
         container.innerHTML = '<p class="chart-data-empty">Load a galaxy to see chart data.</p>';
         return;
     }
 
     var html = '';
 
-    // Global export
     html += '<div class="chart-data-toolbar">';
     html += '<button type="button" class="chart-data-export-btn" onclick="downloadChartDataJSON()">Download all as JSON</button>';
     html += '</div>';
 
-    // Metadata (no export buttons; expanded by default)
     html += '<div class="chart-data-section">';
     html += '<div class="chart-data-section-header" onclick="toggleChartDataSection(this)"><span class="chart-data-header-title"><span class="chart-data-chevron">&#9660;</span> Metadata</span></div>';
     html += '<div class="chart-data-section-body">';
     html += '<table class="obs-data-table chart-data-kv"><tbody>';
     html += '<tr><td>Galaxy</td><td>' + (galaxyName || '--') + '</td></tr>';
-    var rHi = (sandboxResult && sandboxResult.sparc_r_hi_kpc != null) ? Number(sandboxResult.sparc_r_hi_kpc).toFixed(2) + ' kpc' : '--';
+    var rHi = (massModelChartData && massModelChartData.sparc_r_hi_kpc != null) ? Number(massModelChartData.sparc_r_hi_kpc).toFixed(2) + ' kpc' : '--';
     html += '<tr><td>R_HI (kpc)</td><td>' + rHi + '</td></tr>';
-    var src = (sandboxResult && sandboxResult.gfd_source === 'manual') ? 'Manual' : 'Photometric';
+    var src = massModelManuallyModified ? 'Manual' : 'Photometric';
     html += '<tr><td>Mass model source</td><td>' + src + '</td></tr>';
     if (pm) {
         var totalM = (pm.gas ? pm.gas.M : 0) + (pm.disk ? pm.disk.M : 0) + (pm.bulge ? pm.bulge.M : 0);
@@ -3995,7 +1936,6 @@ function renderChartDataTab() {
     }
     html += '</tbody></table></div></div>';
 
-    // Mass model (expanded by default; buttons in header when model exists)
     html += '<div class="chart-data-section">';
     html += '<div class="chart-data-section-header" onclick="toggleChartDataSection(this)"><span class="chart-data-header-title"><span class="chart-data-chevron">&#9660;</span> Mass model</span>';
     if (pm) {
@@ -4023,7 +1963,6 @@ function renderChartDataTab() {
     }
     html += '</div></div>';
 
-    // Observational data (collapsed by default; buttons in header when data exists)
     html += '<div class="chart-data-section chart-data-section-collapsed">';
     html += '<div class="chart-data-section-header" onclick="toggleChartDataSection(this)"><span class="chart-data-header-title"><span class="chart-data-chevron">&#9660;</span> Observational data</span>';
     if (hasObs) {
@@ -4048,15 +1987,13 @@ function renderChartDataTab() {
     }
     html += '</div></div>';
 
-    // Plot series (one subsection per badge series with data)
     var seriesConfig = [
         { idx: 3, id: 'observed', filename: 'observed.csv' },
         { idx: 1, id: 'gfd-photometric', filename: 'gfd_photometric.csv' },
+        { idx: 13, id: 'gfd-topological', filename: 'gfd_topological.csv' },
         { idx: 0, id: 'newtonian', filename: 'newtonian.csv' },
         { idx: 2, id: 'mond', filename: 'mond.csv' },
-        { idx: 7, id: 'cdm', filename: 'cdm.csv' },
-        { idx: 11, id: 'gfd-velocity', filename: 'gfd_velocity.csv' },
-        { idx: 12, id: 'gfd-sst-velocity-decode', filename: 'gfd_sst_velocity_decode.csv' }
+        { idx: 7, id: 'cdm', filename: 'cdm.csv' }
     ];
     if (typeof chart !== 'undefined' && chart && chart.data && chart.data.datasets) {
         for (var sc = 0; sc < seriesConfig.length; sc++) {
@@ -4083,8 +2020,8 @@ function renderChartDataTab() {
                 var vy = (pt.y != null) ? pt.y.toFixed(2) : '--';
                 if (hasErr) {
                     var errVal = (pt.err != null) ? pt.err : (ds.errorBars && ds.errorBars[i] != null) ? ds.errorBars[i] : null;
-                    var errStr = (errVal != null) ? errVal.toFixed(2) : '--';
-                    html += '<tr><td>' + rx + '</td><td>' + vy + '</td><td>' + errStr + '</td></tr>';
+                    var eStr = (errVal != null) ? errVal.toFixed(2) : '--';
+                    html += '<tr><td>' + rx + '</td><td>' + vy + '</td><td>' + eStr + '</td></tr>';
                 } else {
                     html += '<tr><td>' + rx + '</td><td>' + vy + '</td></tr>';
                 }
@@ -4098,441 +2035,12 @@ function renderChartDataTab() {
 }
 
 // =====================================================================
-// FIELD ANALYSIS TAB (GFD metrics + equation display)
-// =====================================================================
-
-// Cache flag so we only fetch once per observation mode session.
-var _fieldAnalysisLoaded = false;
-var _fieldAnalysisData = null;
-
-/**
- * Fetch field analysis metrics from the backend and render them into
- * the Field Analysis tab content area. Uses the current slider values
- * and the fitted Origin Throughput from the last inference run.
- */
-async function loadFieldAnalysis() {
-    if (_fieldAnalysisLoaded && _fieldAnalysisData) {
-        return;
-    }
-
-    var container = document.getElementById('field-analysis-content');
-    if (!container) return;
-
-    container.innerHTML = '<p class="fa-loading">Loading field analysis...</p>';
-
-    var massModel = getMassModelFromSliders();
-    var gr = parseFloat(galacticRadiusSlider.value) || 0;
-    var accelRatio = parseFloat(accelSlider.value) || 1.0;
-
-    var throughput = autoVortexStrength;
-    if (throughput === null && vortexStrengthSlider) {
-        throughput = parseFloat(vortexStrengthSlider.value);
-    }
-    if (!throughput || gr <= 0) {
-        container.innerHTML = '<p class="fa-loading">Observation data required for field analysis.</p>';
-        return;
-    }
-
-    try {
-        var resp = await fetch('/api/rotation/field_analysis', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                mass_model: massModel,
-                galactic_radius: gr,
-                vortex_strength: throughput,
-                accel_ratio: accelRatio
-            })
-        });
-        if (!resp.ok) throw new Error('API error: ' + resp.status);
-        _fieldAnalysisData = await resp.json();
-        _fieldAnalysisLoaded = true;
-        renderFieldAnalysis(container, _fieldAnalysisData);
-    } catch (err) {
-        console.error('Field analysis error:', err);
-        container.innerHTML = '<p style="color: #ff6b6b;">Failed to load field analysis.</p>';
-    }
-}
-
-/**
- * Post-render KaTeX pass. After innerHTML is set, find all elements
- * with data-katex attributes and render them with KaTeX. This avoids
- * timing issues with deferred script loading and ensures the DOM is
- * ready before KaTeX processes each expression.
- */
-function renderKatexElements(root) {
-    if (typeof katex === 'undefined') return;
-    var els = root.querySelectorAll('[data-katex]');
-    for (var i = 0; i < els.length; i++) {
-        var latex = els[i].getAttribute('data-katex');
-        try {
-            katex.render(latex, els[i], {
-                displayMode: false,
-                throwOnError: false
-            });
-        } catch (e) {
-            els[i].textContent = latex;
-        }
-    }
-}
-
-/**
- * Build the Field Analysis tab content from the API response.
- * Structured as an engineering classification report: prioritised
- * sections, collapsible panels, clean enterprise typography.
- */
-function renderFieldAnalysis(container, data) {
-    var galaxyName = '';
-    var example = pinnedGalaxyExample || currentExample;
-    if (example) {
-        galaxyName = example.name.replace(/\s*\(.*\)/, '');
-    }
-
-    var h = '';
-
-    // --- Report Header ---
-    h += '<div class="fa-report-header">';
-    h += '<div class="fa-report-id">FIELD ANALYSIS REPORT</div>';
-    h += '<h2 class="fa-report-name">' + (galaxyName || 'UNKNOWN SYSTEM') + '</h2>';
-    h += '</div>';
-
-    // =========================================================
-    // SECTION 1: FITTED MODEL (open)
-    // =========================================================
-    var pe = data.parametric;
-    if (pe) {
-        h += _faSection('fitted-model', 'Fitted Model', true);
-        h += '<p class="fa-prose">Complete callable equation with all resolved parameters.'
-           + ' Reproduces the rotation curve without the GFD pipeline.</p>';
-
-        h += '<p class="fa-step-label">1. Enclosed mass profiles'
-           + ' <span class="fa-step-note">(Hernquist bulge + exponential disk + gas)</span></p>';
-        h += _eqBlock(pe.mass_bulge);
-        h += _eqBlock(pe.mass_disk);
-        h += _eqBlock(pe.mass_gas);
-        h += _eqBlock(pe.mass_total);
-
-        h += '<p class="fa-step-label">2. Newtonian acceleration</p>';
-        h += _eqBlock(pe.g_newtonian);
-
-        h += '<p class="fa-step-label">3. GFD field solve</p>';
-        h += _eqBlock(pe.gfd_solve);
-
-        h += '<p class="fa-step-label">4a. Structural correction'
-           + ' <span class="fa-step-note">(outer arm, r > R<sub>t</sub>)</span></p>';
-        h += _eqBlock(pe.throughput_outer);
-
-        if (pe.vortex_reflect) {
-            h += '<p class="fa-step-label">4b. Vortex reflection'
-               + ' <span class="fa-step-note">(inner arm, r &le; R<sub>t</sub>)</span></p>';
-            h += _eqBlock(pe.vortex_reflect);
-        }
-
-        h += '<p class="fa-step-label">5. Circular velocity</p>';
-        h += _eqBlock(pe.velocity_final);
-
-        h += '<div class="fa-constants-block">';
-        h += _eqBlock(pe.constants);
-        h += _eqBlock(pe.units);
-        h += '</div>';
-
-        h += '</div></div>';
-    }
-
-    // =========================================================
-    // SECTION 2: FIELD GEOMETRY (open)
-    // =========================================================
-    var fg = data.field_geometry;
-    if (fg) {
-        h += _faSection('field-geom', 'Field Geometry', true);
-
-        // Geometry comparison: from observation (topological) vs profile (catalog)
-        var hasPredicted = fg.predicted_origin_kpc !== null && fg.predicted_origin_kpc !== undefined;
-        if (hasPredicted) {
-            // Build a delta badge with color coding
-            function _deltaBadge(val) {
-                if (val === null || val === undefined) return '<span style="color:#888;">N/A</span>';
-                var abs = Math.abs(val);
-                var color = abs < 3 ? '#4caf50' : abs < 10 ? '#ff9800' : '#ff6b6b';
-                return '<span style="color:' + color + '; font-weight:600;">'
-                     + (val >= 0 ? '+' : '') + val.toFixed(1) + '%</span>';
-            }
-
-            h += '<p class="fa-step-label">Derived from Mass Model vs Galaxy Profile</p>';
-            h += '<table class="fa-table">';
-            h += '<tr class="fa-row fa-row-header">'
-               + '<td class="fa-label"></td>'
-               + '<td class="fa-symbol"></td>'
-               + '<td class="fa-value" style="text-align:right; font-weight:600; color:#9ecfff;">From Observation</td>'
-               + '<td class="fa-value" style="text-align:right; color:#888;">Profile</td>'
-               + '<td class="fa-value" style="text-align:right;">&Delta;</td>'
-               + '</tr>';
-            h += '<tr class="fa-row">'
-               + '<td class="fa-label">Field Origin</td>'
-               + '<td class="fa-symbol">' + _katexInline('R_t') + '</td>'
-               + '<td class="fa-value" style="text-align:right; font-weight:600;">' + fg.predicted_origin_kpc + ' kpc</td>'
-               + '<td class="fa-value" style="text-align:right; color:#888;">' + fg.catalog_origin_kpc + ' kpc</td>'
-               + '<td class="fa-value" style="text-align:right;">' + _deltaBadge(fg.origin_delta_pct) + '</td>'
-               + '</tr>';
-            h += '<tr class="fa-row">'
-               + '<td class="fa-label">Field Horizon</td>'
-               + '<td class="fa-symbol">' + _katexInline('R_{\\mathrm{env}}') + '</td>'
-               + '<td class="fa-value" style="text-align:right; font-weight:600;">' + fg.predicted_horizon_kpc + ' kpc</td>'
-               + '<td class="fa-value" style="text-align:right; color:#888;">' + fg.catalog_horizon_kpc + ' kpc</td>'
-               + '<td class="fa-value" style="text-align:right;">' + _deltaBadge(fg.horizon_delta_pct) + '</td>'
-               + '</tr>';
-            h += '<tr class="fa-row">'
-               + '<td class="fa-label">Throat Fraction</td>'
-               + '<td class="fa-symbol">' + _katexInline('R_t / R_{\\mathrm{env}}') + '</td>'
-               + '<td class="fa-value" style="text-align:right; font-weight:600;">' + fg.throat_fraction + '</td>'
-               + '<td class="fa-value" style="text-align:right; color:#888;">0.3000</td>'
-               + '<td class="fa-value" style="text-align:right;"></td>'
-               + '</tr>';
-            h += '</table>';
-            if (fg.yN_at_throat !== null && fg.yN_at_throat !== undefined) {
-                h += '<p class="fa-prose" style="margin-top:8px;">'
-                   + 'Throat condition: ' + _katexInline('y_N(R_t) = 18/65')
-                   + ' &nbsp; Measured: ' + fg.yN_at_throat
-                   + ' &nbsp; Method: ' + fg.prediction_method + '</p>';
-            }
-        } else {
-            h += '<p class="fa-prose" style="margin-top:4px; color:#ff9800;">Deep-field system: '
-               + 'y<sub>N</sub> never reaches 18/65. Catalog geometry used.</p>';
-            h += '<table class="fa-table">';
-            h += _faRow('Field Origin (profile)', _katexInline('R_t'), fg.catalog_origin_kpc + ' kpc');
-            h += _faRow('Field Horizon (profile)', _katexInline('R_{\\mathrm{env}}'), fg.catalog_horizon_kpc + ' kpc');
-            h += '</table>';
-        }
-
-        // Throughput and throat fraction
-        h += '<table class="fa-table" style="margin-top:12px;">';
-        h += _faRow('Throat Fraction', _katexInline('R_t / R_{\\mathrm{env}}'), fg.throat_fraction);
-        h += _faRow('Origin Throughput (fitted)', _katexInline('\\sigma'), fg.origin_throughput_fitted);
-        h += _faRow('Origin Throughput (theoretical)', '', fg.origin_throughput_theoretical);
-        h += _faRow('Throughput Delta', '', _signed(fg.throughput_delta_pct) + '%');
-        h += '</table>';
-        h += '</div></div>';
-    }
-
-    // =========================================================
-    // SECTION 3: RESOLVED MASS (open)
-    // =========================================================
-    var mp = data.mass_properties;
-    if (mp) {
-        h += _faSection('resolved-mass', 'Resolved Mass', true);
-        h += '<table class="fa-table">';
-        h += _faRow('Total Baryonic', _katexInline('M_{\\mathrm{bary}}'), _sciNot(mp.total_baryonic_Msun) + ' M<sub>&#x2609;</sub>');
-        h += _faRow('Stellar Bulge', _katexInline('M_{\\mathrm{b}}'), _sciNot(mp.bulge_Msun) + ' M<sub>&#x2609;</sub>');
-        h += _faRow('Stellar Disk', _katexInline('M_{\\mathrm{d}}'), _sciNot(mp.disk_Msun) + ' M<sub>&#x2609;</sub>');
-        h += _faRow('Gas Disk', _katexInline('M_{\\mathrm{g}}'), _sciNot(mp.gas_Msun) + ' M<sub>&#x2609;</sub>');
-        h += _faRow('Gas Fraction', _katexInline('f_{\\mathrm{gas}}'), (mp.gas_fraction * 100).toFixed(1) + '%');
-        h += _faRow('Bulge / Total', _katexInline('B/T'), (mp.bulge_to_total * 100).toFixed(1) + '%');
-        h += '</table>';
-        h += '</div></div>';
-    }
-
-    // =========================================================
-    // SECTION 4: VELOCITY PROFILE (collapsed)
-    // =========================================================
-    var dyn = data.dynamics;
-    if (dyn) {
-        h += _faSection('velocity', 'Velocity Profile', false);
-        h += '<table class="fa-table">';
-        h += _faRow('Peak velocity (GFD base)', '', dyn.v_peak_gfd_kms + ' km/s at ' + dyn.r_peak_gfd_kpc + ' kpc');
-        h += _faRow('Peak velocity (observed)', '', dyn.v_peak_observed_kms + ' km/s at ' + dyn.r_peak_observed_kpc + ' kpc');
-        h += _faRow('v at Field Origin (base)', '', dyn.v_at_origin_gfd_kms + ' km/s');
-        h += _faRow('v at Field Origin (observed)', '', dyn.v_at_origin_observed_kms + ' km/s');
-        h += _faRow('v at Field Horizon (base)', '', dyn.v_at_horizon_gfd_kms + ' km/s');
-        h += _faRow('v at Field Horizon (observed)', '', dyn.v_at_horizon_observed_kms + ' km/s');
-        if (dyn.r_transition_kpc > 0) {
-            h += _faRow('Transition radius (y<sub>N</sub> = 1)', _katexInline('r_{\\mathrm{trans}}'), dyn.r_transition_kpc + ' kpc');
-        }
-        h += '</table>';
-        h += '</div></div>';
-    }
-
-    // =========================================================
-    // SECTION 5: STRUCTURAL CORRECTION (collapsed)
-    // =========================================================
-    var te = data.throughput_effect;
-    if (te) {
-        h += _faSection('struct-corr', 'Structural Correction', false);
-        h += '<table class="fa-table">';
-        h += _faRow('Delta v at Origin', _katexInline('\\Delta v(R_t)'), _signed(te.delta_v_at_origin_kms) + ' km/s');
-        h += _faRow('Delta v at Horizon', _katexInline('\\Delta v(R_{\\mathrm{env}})'), _signed(te.delta_v_at_horizon_kms) + ' km/s');
-        h += _faRow('Delta % at Horizon', '', _signed(te.delta_pct_at_horizon) + '%');
-        h += _faRow('GFD / Newtonian at Origin', '', te.gfd_newt_ratio_at_origin + 'x');
-        h += _faRow('GFD / Newtonian at Horizon', '', te.gfd_newt_ratio_at_horizon + 'x');
-        h += '</table>';
-        h += '</div></div>';
-    }
-
-    // =========================================================
-    // SECTION 6: FIELD CONSTANTS (collapsed)
-    // =========================================================
-    var fc = data.field_coupling;
-    if (fc) {
-        h += _faSection('field-const', 'Field Constants', false);
-        h += '<table class="fa-table">';
-        h += _faRow('Acceleration scale', _katexInline('a_0'), fc.a0_ms2.toExponential(4) + ' m/s<sup>2</sup>');
-        h += _faRow('Simplex number', _katexInline('k'), fc.k_simplex);
-        h += _faRow('y<sub>N</sub> at Field Origin', _katexInline('y_N(R_t)'), fc.yN_at_origin);
-        h += _faRow('y<sub>N</sub> at Field Horizon', _katexInline('y_N(R_{\\mathrm{env}})'), fc.yN_at_horizon);
-        h += _faRow('Effective coupling', _katexInline('f_{\\mathrm{eff}}'), fc.f_eff);
-        h += _faRow('Structural release amplitude', _katexInline('g_0'), fc.g0_ms2.toExponential(4) + ' m/s<sup>2</sup>');
-        h += _faRow('Structural fraction', '', fc.structural_frac);
-        h += _faRow('Outer power law', '', fc.power_law);
-        h += '</table>';
-        h += '</div></div>';
-    }
-
-    // =========================================================
-    // SECTION 7: THEORY REFERENCE (collapsed)
-    // =========================================================
-    if (data.equations) {
-        h += _faSection('theory-ref', 'Theory Reference', false);
-        h += '<p class="fa-prose">The complete GFD derivation chain, from the covariant action'
-           + ' through to the velocity formula. All terms are fixed by the topology'
-           + ' of the stellated octahedron.</p>';
-
-        h += '<p class="fa-step-label">Covariant Action</p>';
-        h += _eqBlock(data.equations.action);
-
-        h += '<p class="fa-step-label">Coupling Polynomial'
-           + ' <span class="fa-step-note">(stellated octahedron)</span></p>';
-        h += _eqBlock(data.equations.coupling_poly);
-
-        h += '<p class="fa-step-label">Scalar Lagrangian</p>';
-        h += _eqBlock(data.equations.lagrangian);
-
-        h += '<p class="fa-step-label">Algebraic Field Equation'
-           + ' <span class="fa-step-note">(Euler-Lagrange in spherical symmetry)</span></p>';
-        h += _eqBlock(data.equations.field_eq);
-
-        h += '<p class="fa-step-label">Analytic Solution</p>';
-        h += _eqBlock(data.equations.solution);
-
-        h += '<p class="fa-step-label">Circular Velocity</p>';
-        h += _eqBlock(data.equations.velocity);
-
-        h += '<p class="fa-step-label">Acceleration Scale'
-           + ' <span class="fa-step-note">(zero free parameters)</span></p>';
-        h += _eqBlock(data.equations.acceleration_scale);
-
-        h += '</div></div>';
-    }
-
-    container.innerHTML = h;
-
-    // Post-render: KaTeX processes all data-katex elements
-    renderKatexElements(container);
-
-    // Wire collapsible section headers
-    _wireFaCollapse(container);
-}
-
-/**
- * Build the opening HTML for a collapsible field analysis section.
- * Returns the header + opening body div. Caller must close with </div></div>.
- */
-function _faSection(id, title, open) {
-    var cls = open ? 'fa-section' : 'fa-section fa-collapsed';
-    var chevron = open ? '&#9660;' : '&#9654;';
-    return '<div class="' + cls + '" data-fa-section="' + id + '">'
-         + '<div class="fa-section-header" onclick="_toggleFaSection(this)">'
-         + '<span class="fa-chevron">' + chevron + '</span>'
-         + '<h3>' + title + '</h3>'
-         + '</div>'
-         + '<div class="fa-section-body"' + (open ? '' : ' style="display:none"') + '>';
-}
-
-/** Toggle a collapsible field analysis section. */
-function _toggleFaSection(headerEl) {
-    var section = headerEl.parentElement;
-    var body = headerEl.nextElementSibling;
-    var chevron = headerEl.querySelector('.fa-chevron');
-    if (!body) return;
-    if (body.style.display === 'none') {
-        body.style.display = '';
-        chevron.innerHTML = '&#9660;';
-        section.classList.remove('fa-collapsed');
-    } else {
-        body.style.display = 'none';
-        chevron.innerHTML = '&#9654;';
-        section.classList.add('fa-collapsed');
-    }
-}
-
-/** Wire collapse handlers after innerHTML render. */
-function _wireFaCollapse(container) {
-    // KaTeX elements inside initially-hidden sections need rendering
-    // when the section is first opened.
-    var sections = container.querySelectorAll('.fa-section[data-fa-section]');
-    sections.forEach(function(sec) {
-        var header = sec.querySelector('.fa-section-header');
-        if (!header) return;
-        var body = sec.querySelector('.fa-section-body');
-        if (!body) return;
-        var rendered = !sec.classList.contains('fa-collapsed');
-        header.addEventListener('click', function() {
-            if (!rendered) {
-                renderKatexElements(body);
-                rendered = true;
-            }
-        });
-    });
-}
-
-/** Build a left-aligned block equation placeholder for post-render KaTeX. */
-function _eqBlock(latex) {
-    return '<div class="fa-eq" data-katex="' + _escAttr(latex) + '"></div>';
-}
-
-/** Build an inline KaTeX placeholder span (rendered in post-pass). */
-function _katexInline(latex) {
-    return '<span class="fa-sym" data-katex="' + _escAttr(latex) + '"></span>';
-}
-
-/** Escape a string for safe use inside an HTML attribute. */
-function _escAttr(s) {
-    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/** Build a three-column metrics row: label, symbol, value. */
-function _faRow(label, sym, value) {
-    return '<tr>'
-         + '<td class="fa-label">' + label + '</td>'
-         + '<td class="fa-sym-cell">' + sym + '</td>'
-         + '<td class="fa-value">' + value + '</td>'
-         + '</tr>';
-}
-
-/** Format a solar mass value in compact scientific notation. */
-function _sciNot(val) {
-    if (val === 0 || val == null) return '0';
-    return parseFloat(val).toExponential(3);
-}
-
-/** Prefix positive numbers with +, leave negatives as-is. */
-function _signed(val) {
-    var n = parseFloat(val);
-    if (isNaN(n)) return val;
-    return (n >= 0 ? '+' : '') + val;
-}
-
-// =====================================================================
-// FONT SIZE CONTROLS (Observation Data + Field Analysis tabs)
+// FONT SIZE CONTROLS
 // =====================================================================
 
 var _obsFontSizes = [0.75, 0.85, 1.0, 1.15, 1.3];
 var _obsFontIndex = 2;
 
-/**
- * Wire up all A-/A+ buttons inside .obs-data-face panels.
- * Each button steps the shared font index and applies to all
- * .obs-data-content elements simultaneously.
- */
 function initObsFontControls() {
     var btns = document.querySelectorAll('.obs-font-btn');
     btns.forEach(function(btn) {
@@ -4546,30 +2054,23 @@ function initObsFontControls() {
     });
 }
 
-// Toggle mass value sliders between editable (prediction) and read-only output (inference)
+// =====================================================================
+// MASS SLIDER EDIT STATE
+// =====================================================================
+
 function setMassSliderEditable(editable) {
     const massSliders = [bulgeMassSlider, diskMassSlider, gasMassSlider];
-    const massLabels = [
-        bulgeMassSlider.previousElementSibling,
-        diskMassSlider.previousElementSibling,
-        diskMassSlider.previousElementSibling
-    ];
 
     massSliders.forEach(s => {
         s.disabled = !editable;
-        // CSS handles the heavy dimming via :disabled selector
     });
 
-    // Dim the "Mass" label text in inference mode, keep value visible
     document.querySelectorAll('.mass-component .control-label').forEach((label, idx) => {
-        // Even-indexed labels are mass labels, odd are scale labels
         if (idx % 2 === 0) {
-            // Mass label row
             const labelText = label.querySelector('span:first-child');
             const valueText = label.querySelector('.control-value');
             if (!editable) {
                 if (labelText) labelText.style.opacity = '0.4';
-                // Keep value text bright -- it's the output
                 if (valueText) valueText.style.opacity = '1';
             } else {
                 if (labelText) labelText.style.opacity = '1';
@@ -4578,7 +2079,6 @@ function setMassSliderEditable(editable) {
         }
     });
 
-    // Scale length sliders are always editable (user controls shape)
     const scaleSliders = [bulgeScaleSlider, diskScaleSlider, gasScaleSlider];
     scaleSliders.forEach(s => {
         s.disabled = false;
@@ -4587,70 +2087,41 @@ function setMassSliderEditable(editable) {
 }
 
 // =====================================================================
-// SLIDER EVENT LISTENERS
+// SECONDARY SLIDER LISTENERS
 // =====================================================================
 
 distanceSlider.addEventListener('input', () => {
+    updateDisplays();
     if (!isLoadingExample && currentExample) {
-        currentExample = null;
-        // Keep pinned observations -- user is fine-tuning
-    }
-    if (!isLoadingExample) {
-        updateDisplays();
-        debouncedUpdateChart();
+        debouncedRefreshChart();
     }
 });
 
 massSlider.addEventListener('input', () => {
-    if (!isLoadingExample && currentMode === 'prediction' && currentExample) {
-        if (!currentExample.mass_model) {
-            currentExample = null;
-        }
-    }
-    if (!isLoadingExample) {
-        updateDisplays();
-        debouncedUpdateChart();
-    }
+    updateDisplays();
 });
 
 velocitySlider.addEventListener('input', () => {
-    if (!isLoadingExample) {
-        currentExample = null;
-        // Keep pinned observations -- user is fine-tuning
-        updateDisplays();
-        debouncedUpdateChart();
-    }
+    updateDisplays();
 });
 
 accelSlider.addEventListener('input', () => {
+    updateDisplays();
     if (!isLoadingExample && currentExample) {
-        currentExample = null;
-        // Keep pinned observations -- user is fine-tuning
-    }
-    if (!isLoadingExample) {
-        updateDisplays();
-        debouncedUpdateChart();
+        debouncedRefreshChart();
     }
 });
 
 // =====================================================================
-// RESET TO PHOTOMETRIC BUTTON (Mass Model panel)
+// RESET TO PHOTOMETRIC
 // =====================================================================
+
 var resetToPhotometricBtn = document.getElementById('reset-to-photometric-btn');
 if (resetToPhotometricBtn) {
     resetToPhotometricBtn.addEventListener('click', function() {
         resetToPhotometric();
     });
 }
-
-// =====================================================================
-// BAND METHOD SELECTOR
-// =====================================================================
-document.getElementById('band-method-select').addEventListener('change', async function() {
-    if (lastMultiResult && lastModelTotal > 0) {
-        await updateBand();
-    }
-});
 
 // =====================================================================
 // RESIZABLE PANEL
@@ -4682,10 +2153,6 @@ document.addEventListener('mouseup', () => {
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         chart.resize();
-        if (vpsChart) {
-            vpsChart.resize();
-            if (isAutoFitted) setTimeout(function() { updateVpsChart(); }, 0);
-        }
     }
     if (isResizingMetrics) {
         isResizingMetrics = false;
@@ -4693,10 +2160,6 @@ document.addEventListener('mouseup', () => {
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         chart.resize();
-        if (vpsChart) {
-            vpsChart.resize();
-            if (isAutoFitted) setTimeout(function() { updateVpsChart(); }, 0);
-        }
     }
 });
 
@@ -4707,7 +2170,7 @@ document.addEventListener('mouseup', () => {
 const metricsPanel = document.getElementById('metrics-panel');
 const metricsResizeHandle = document.getElementById('metrics-resize-handle');
 let isResizingMetrics = false;
-let metricsWidthBeforeCollapse = 280;
+let metricsWidthBeforeCollapse = 350;
 
 metricsResizeHandle.addEventListener('mousedown', () => {
     if (metricsPanel.classList.contains('collapsed')) return;
@@ -4721,9 +2184,8 @@ document.addEventListener('mousemove', (e) => {
     if (!isResizingMetrics) return;
     var containerRight = metricsPanel.parentElement.getBoundingClientRect().right;
     var newWidth = containerRight - e.clientX;
-    if (newWidth >= 280 && newWidth <= 600) {
+    if (newWidth >= 350 && newWidth <= 600) {
         metricsPanel.style.width = newWidth + 'px';
-        metricsPanel.style.minWidth = newWidth + 'px';
         metricsWidthBeforeCollapse = newWidth;
     }
 });
@@ -4733,17 +2195,12 @@ function toggleMetricsPanel() {
     if (panel.classList.contains('collapsed')) {
         panel.classList.remove('collapsed');
         panel.style.width = metricsWidthBeforeCollapse + 'px';
-        panel.style.minWidth = metricsWidthBeforeCollapse + 'px';
     } else {
-        metricsWidthBeforeCollapse = parseInt(panel.style.width) || 280;
+        metricsWidthBeforeCollapse = parseInt(panel.style.width) || 350;
         panel.classList.add('collapsed');
     }
     setTimeout(function() {
         chart.resize();
-        if (vpsChart) {
-            vpsChart.resize();
-            if (isAutoFitted) updateVpsChart();
-        }
     }, 250);
 }
 
@@ -4789,146 +2246,30 @@ document.addEventListener('mouseup', function() {
     }
 });
 
-/**
- * Show the auto-map diagnostics pane with gene report data.
- */
-function showAutoMapDiagnostics(data) {
-    if (!metricsPaneTop || !data) return;
+// =====================================================================
+// DIAGNOSTICS PANE HELPERS
+// =====================================================================
 
-    // Update header to reflect fit method
-    var headerText = document.querySelector('#metrics-automap-summary .metrics-header-text');
-    if (headerText) {
-        var method = data.throughput_fit && data.throughput_fit.method;
-        if (method && method === 'inference') {
-            headerText.textContent = 'Observation Results (derived)';
-        } else {
-            headerText.textContent = 'Observation Results';
-        }
-    }
-
-    // Summary metrics
-    var fit = data.throughput_fit;
-    if (fit) {
-        document.getElementById('metric-am-gfd-rms').textContent =
-            fit.gfd_rms_km_s != null ? fit.gfd_rms_km_s.toFixed(1) + ' km/s' : '--';
-        var chi2El = document.getElementById('metric-am-chi2');
-        if (fit.chi2_dof != null) {
-            chi2El.textContent = fit.chi2_dof.toFixed(2);
-            chi2El.className = 'metrics-value' + (fit.chi2_dof <= 1.5 ? ' good' : fit.chi2_dof <= 3 ? ' warn' : ' bad');
-        }
-    }
-
-    // Band coverage
-    var band = data.band_coverage;
-    if (band) {
-        document.getElementById('metric-am-band-hits').textContent =
-            band.obs_hits + '/' + band.obs_total;
-    }
-
-    // Field Geometry section: prefer topologically derived values from
-    // inferredFieldGeometry, fall back to slider + THROAT_FRAC constant.
-    var fg = inferredFieldGeometry;
-    var rEnv, rOrigin, throatRatio;
-    if (fg && fg.envelope_radius_kpc != null && fg.throat_radius_kpc != null) {
-        rEnv = fg.envelope_radius_kpc;
-        rOrigin = fg.throat_radius_kpc;
-        throatRatio = fg.throat_fraction != null ? fg.throat_fraction : (rEnv > 0 ? rOrigin / rEnv : 0);
-    } else {
-        rEnv = parseFloat(galacticRadiusSlider.value) || 0;
-        rOrigin = THROAT_FRAC * rEnv;
-        throatRatio = rEnv > 0 ? THROAT_FRAC : 0;
-    }
-    var throughputVal = data.auto_origin_throughput;
-
-    var fgThroughput = document.getElementById('metric-fg-throughput');
-    var fgOrigin = document.getElementById('metric-fg-origin');
-    var fgHorizon = document.getElementById('metric-fg-horizon');
-    var fgRatio = document.getElementById('metric-fg-ratio');
-
-    if (fgThroughput) fgThroughput.textContent = throughputVal != null ? throughputVal.toFixed(2) : '--';
-    if (fgOrigin) fgOrigin.textContent = rOrigin.toFixed(1) + ' kpc';
-    if (fgHorizon) fgHorizon.textContent = rEnv.toFixed(1) + ' kpc';
-    if (fgRatio) fgRatio.textContent = throatRatio > 0 ? throatRatio.toFixed(2) : '--';
-
-    // Gene report (parameter changes table)
-    var report = data.gene_report;
-    var tbody = document.getElementById('metrics-automap-tbody');
-    if (tbody && report && report.length > 0) {
-        var html = '';
-        for (var i = 0; i < report.length; i++) {
-            var g = report[i];
-            var pctChange = ((g.ratio - 1.0) * 100);
-            var pctStr = (pctChange >= 0 ? '+' : '') + pctChange.toFixed(1) + '%';
-            var sigStr = g.within_sigma ? '0' : g.sigma_excess.toFixed(1);
-            var chi2Str = g.chi2_bought > 0 ? '+' + g.chi2_bought.toFixed(1) : g.chi2_bought.toFixed(1);
-
-            var isMass = g.gene && (g.gene === 'Mb' || g.gene === 'Md' || g.gene === 'Mg');
-            var priorStr = isMass ? g.published.toExponential(3) : g.published.toFixed(2);
-            var postStr  = isMass ? g.fitted.toExponential(3) : g.fitted.toFixed(2);
-
-            var cls = '';
-            if (!g.within_sigma) {
-                cls = g.sigma_excess <= 1.0 ? 'sigma-warn' : 'sigma-bad';
-            } else {
-                cls = 'sigma-good';
-            }
-
-            html += '<tr class="' + cls + '">'
-                + '<td style="text-align:left;">' + g.name + '</td>'
-                + '<td>' + priorStr + '</td>'
-                + '<td>' + postStr + '</td>'
-                + '<td>' + pctStr + '</td>'
-                + '<td>' + sigStr + '</td>'
-                + '<td>' + chi2Str + '</td>'
-                + '</tr>';
-        }
-        tbody.innerHTML = html;
-    }
-
-    // Show the pane and activate split layout
-    metricsPaneTop.style.display = '';
-    metricsPaneDivider.style.display = '';
-
-    // Set initial 50/50 split
-    var panelH = metricsPanel.getBoundingClientRect().height;
-    metricsPaneTop.style.height = Math.floor(panelH * 0.5) + 'px';
-    metricsPaneTop.style.flex = 'none';
-    metricsPaneBottom.style.flex = '1';
-}
-
-/**
- * Hide the auto-map diagnostics pane.
- */
 function hideAutoMapDiagnostics() {
     if (!metricsPaneTop) return;
     metricsPaneTop.style.display = 'none';
-    metricsPaneDivider.style.display = 'none';
+    if (metricsPaneDivider) metricsPaneDivider.style.display = 'none';
     metricsPaneTop.style.height = '';
     metricsPaneTop.style.flex = '';
-    metricsPaneBottom.style.flex = '';
+    if (metricsPaneBottom) metricsPaneBottom.style.flex = '';
 }
 
 function blankRightPaneMetrics() {
     if (metricsPaneTop) {
         metricsPaneTop.style.display = 'none';
-        metricsPaneDivider.style.display = 'none';
-    }
-    if (metricsPaneBottom) {
-        metricsPaneBottom.innerHTML = '';
+        if (metricsPaneDivider) metricsPaneDivider.style.display = 'none';
     }
 }
 
 // =====================================================================
 // THEORY TOGGLE BAR
 // =====================================================================
-//
-// Maps each toggle chip's data-series attribute to the Chart.js dataset
-// indices it controls. Toggling a chip shows or hides those datasets.
 
-/**
- * Check whether a theory toggle chip is currently enabled (checked).
- * Returns true if the chip is checked or if no chip exists for the key.
- */
 function isChipEnabled(seriesKey) {
     var chip = document.querySelector('.theory-chip[data-series="' + seriesKey + '"]');
     if (!chip) return true;
@@ -4937,28 +2278,22 @@ function isChipEnabled(seriesKey) {
 }
 
 var theoryDatasetMap = {
-    'observed':      [3],       // Observed Data points
-    'newtonian':     [0],       // Newtonian Gravity
-    'gfd':           [1],       // GFD (Photometric)
-    'gfd_sigma_old': [8],       // Legacy Bayesian GFD Sigma (hidden)
-    'gfd_spline':    [10],      // GFD Sigma (fast observation fit)
-    'gfd_velocity':  [11],      // GFD (Velocity) - smoothed observed curve from rotation service
-    'gfd_sst_velocity_decode': [12],  // GFD velocity decode (no mass input)
-    'gfd_symmetric': [9],       // Legacy GFD (Observed) - hidden
-    'mond':          [2],       // Classical MOND
-    'cdm':           [7]        // CDM + NFW
+    'observed':      [3],
+    'newtonian':     [0],
+    'gfd':           [1],
+    'gfd_sigma_old': [8],
+    'gfd_spline':    [10],
+    'gfd_velocity':  [11],
+    'gfd_sst_velocity_decode': [12],
+    'gfd_symmetric': [9],
+    'gfd_topological': [13],
+    'mond':          [2],
+    'cdm':           [7]
 };
 
-/**
- * Force a theory chip on by data-series key.
- * Ensures the checkbox is checked, the chip has the active class,
- * the corresponding datasets are visible, and adds a "locked" CSS
- * class so the user can see the chip is non-toggleable.
- */
 function forceChipOn(seriesKey) {
     var chip = document.querySelector('.theory-chip[data-series="' + seriesKey + '"]');
     if (!chip) return;
-    // Unhide the chip if it was hidden via inline style
     chip.style.display = '';
     var cb = chip.querySelector('input[type="checkbox"]');
     if (cb) cb.checked = true;
@@ -4970,10 +2305,6 @@ function forceChipOn(seriesKey) {
     }
 }
 
-/**
- * Remove the "locked" CSS class from all theory chips.
- * Called when leaving inference mode so chips become toggleable again.
- */
 function unlockAllChips() {
     var chips = document.querySelectorAll('.theory-chip.locked');
     for (var i = 0; i < chips.length; i++) {
@@ -4981,24 +2312,16 @@ function unlockAllChips() {
     }
 }
 
-/**
- * Initialize theory toggle chips: sync checked state with active class,
- * attach click handlers to toggle chart dataset visibility.
- */
 function initTheoryToggles() {
     var chips = document.querySelectorAll('.theory-chip');
     for (var i = 0; i < chips.length; i++) {
         var chip = chips[i];
         var checkbox = chip.querySelector('input[type="checkbox"]');
 
-        // Set initial active class from checkbox state
         if (checkbox && checkbox.checked) {
             chip.classList.add('active');
         }
 
-        // Click handler: toggle dataset visibility.
-        // preventDefault() stops the <label> from toggling the checkbox
-        // on its own, so we control the state exactly once per click.
         chip.addEventListener('click', function(e) {
             e.preventDefault();
             var seriesKey = this.getAttribute('data-series');
@@ -5009,14 +2332,12 @@ function initTheoryToggles() {
             var indices = theoryDatasetMap[seriesKey] || [];
             var hidden = !cb.checked;
 
-            // Apply active class for styling
             if (cb.checked) {
                 this.classList.add('active');
             } else {
                 this.classList.remove('active');
             }
 
-            // Show or hide each mapped dataset
             for (var j = 0; j < indices.length; j++) {
                 chart.data.datasets[indices[j]].hidden = hidden;
             }
@@ -5028,15 +2349,9 @@ function initTheoryToggles() {
 // =====================================================================
 // CROSSHAIR READOUT
 // =====================================================================
-//
-// Shows a floating panel near the cursor with interpolated values from
-// each visible theory curve at the current x (radius) position.
 
 var crosshairReadout = null;
 
-/**
- * Create the crosshair readout DOM element and append to chart container.
- */
 function initCrosshairReadout() {
     var container = document.querySelector('.chart-container');
     if (!container) return;
@@ -5045,23 +2360,19 @@ function initCrosshairReadout() {
     crosshairReadout.className = 'crosshair-readout';
     container.appendChild(crosshairReadout);
 
-    // Track mouse movement over the canvas
     var canvasEl = document.getElementById('gravityChart');
     if (!canvasEl) return;
 
     canvasEl.addEventListener('mousemove', function(e) {
         if (!crosshairReadout) return;
 
-        // Get the x-axis scale to convert pixel to data coordinates
         var xScale = chart.scales.x;
         var yScale = chart.scales.y;
         if (!xScale || !yScale) return;
 
-        // Convert mouse x to chart area pixel offset
         var rect = canvasEl.getBoundingClientRect();
         var pixelX = e.clientX - rect.left;
 
-        // Only show readout when mouse is within the plot area
         if (pixelX < xScale.left || pixelX > xScale.right) {
             crosshairReadout.classList.remove('visible');
             return;
@@ -5073,18 +2384,15 @@ function initCrosshairReadout() {
             return;
         }
 
-        // Build readout content with one row per visible series
-        var html = '<div style="margin-bottom:4px;color:#4da6ff;font-weight:600;">r = ' +
+        var html = '<div style="margin-bottom:4px;color:#00E5A0;font-weight:600;">r = ' +
                    radius.toFixed(1) + ' kpc</div>';
 
-        // Series definitions: name, dataset index, color, label
         var seriesDefs = [
-            {key: 'observed',      idx: 3, color: '#FFC107', label: 'Observed'},
-            {key: 'newtonian',     idx: 0, color: '#ff6b6b', label: 'Newtonian'},
-            {key: 'gfd',           idx: 1, color: '#4da6ff', label: 'GFD'},
-            {key: 'gfd_symmetric', idx: 9, color: '#00E5FF', label: 'GFD (Observed)'},
-            {key: 'mond',          idx: 2, color: '#9966ff', label: 'MOND'},
-            {key: 'cdm',           idx: 7, color: '#ffffff', label: 'CDM'}
+            {key: 'observed',  idx: 3, color: '#FFC107', label: 'Observed'},
+            {key: 'newtonian', idx: 0, color: '#ff6b6b', label: 'Newtonian'},
+            {key: 'gfd',       idx: 1, color: '#00E5A0', label: 'GFD'},
+            {key: 'mond',      idx: 2, color: '#9966ff', label: 'MOND'},
+            {key: 'cdm',       idx: 7, color: '#ffffff', label: 'CDM'}
         ];
 
         var hasValues = false;
@@ -5093,7 +2401,6 @@ function initCrosshairReadout() {
             var ds = chart.data.datasets[def.idx];
             if (!ds || ds.hidden || !ds.data || ds.data.length === 0) continue;
 
-            // For observed data, find nearest point instead of interpolating
             var val = null;
             if (def.key === 'observed') {
                 var nearest = null;
@@ -5105,20 +2412,18 @@ function initCrosshairReadout() {
                         nearest = ds.data[p];
                     }
                 }
-                // Only show if within 1 kpc of a data point
                 if (nearest && nearestDist < 1.0) {
-                    var errStr = nearest.err ? ' +/- ' + nearest.err.toFixed(1) : '';
+                    var eStr = nearest.err ? ' +/- ' + nearest.err.toFixed(1) : '';
                     html += '<div class="crosshair-readout-row">' +
                             '<span class="crosshair-dot" style="background:' + def.color + '"></span>' +
                             '<span class="crosshair-label">' + def.label + '</span>' +
-                            '<span class="crosshair-value">' + nearest.y.toFixed(1) + errStr + ' km/s</span>' +
+                            '<span class="crosshair-value">' + nearest.y.toFixed(1) + eStr + ' km/s</span>' +
                             '</div>';
                     hasValues = true;
                 }
                 continue;
             }
 
-            // For theory curves, interpolate
             val = interpolateCurve(def.idx, radius);
             if (val !== null) {
                 html += '<div class="crosshair-readout-row">' +
@@ -5138,13 +2443,10 @@ function initCrosshairReadout() {
         crosshairReadout.innerHTML = html;
         crosshairReadout.classList.add('visible');
 
-        // Position readout near cursor, offset to the right.
-        // Use chart container as reference for absolute positioning.
         var containerRect = container.getBoundingClientRect();
         var readoutLeft = e.clientX - containerRect.left + 16;
         var readoutTop = e.clientY - containerRect.top - 20;
 
-        // Clamp so it doesn't overflow the container
         var readoutWidth = crosshairReadout.offsetWidth || 200;
         var readoutHeight = crosshairReadout.offsetHeight || 100;
         if (readoutLeft + readoutWidth > containerRect.width - 10) {
@@ -5159,7 +2461,6 @@ function initCrosshairReadout() {
         crosshairReadout.style.top = readoutTop + 'px';
     });
 
-    // Hide readout when mouse leaves the canvas
     canvasEl.addEventListener('mouseleave', function() {
         if (crosshairReadout) {
             crosshairReadout.classList.remove('visible');
@@ -5207,242 +2508,45 @@ function dismissSplash() {
     }, remaining);
 }
 
-// ---------------------------------------------------------------------------
-// SPARC Import Overlay
-// ---------------------------------------------------------------------------
-function initSparcImportOverlay() {
-    var overlay = document.getElementById('sparc-import-overlay');
-    var openBtn = document.getElementById('add-from-sparc-btn');
-    var closeBtn = document.getElementById('sparc-import-close');
-    var closeBtn2 = document.getElementById('sparc-import-close-btn');
-    var searchInput = document.getElementById('sparc-search-input');
-    var listEl = document.getElementById('sparc-import-list');
-    var listWrap = document.querySelector('.sparc-import-list-wrap');
-    var loadingEl = document.getElementById('sparc-import-loading');
-    var emptyEl = document.getElementById('sparc-import-empty');
-    var importBtn = document.getElementById('sparc-import-btn');
-    var messageEl = document.getElementById('sparc-import-message');
-
-    var sparcCatalog = { galaxies: [], already_imported: [], importable_ids: [] };
-    var selectedId = null;
-    var focusableSelector = '.sparc-import-close, #sparc-search-input, .sparc-import-item, #sparc-import-btn, #sparc-import-close-btn';
-
-    function showMessage(text, isError, isProgress) {
-        messageEl.textContent = text;
-        messageEl.className = 'sparc-import-message ' +
-            (isProgress ? 'progress' : (isError ? 'error' : 'success'));
-        messageEl.style.display = 'block';
-    }
-    function hideMessage() {
-        messageEl.style.display = 'none';
-        messageEl.textContent = '';
-    }
-    function messageForError(body) {
-        var code = body && body.error_code;
-        if (code === 'not_found') {
-            return 'No SPARC data file for this galaxy. Only galaxies with pre-loaded data (e.g. ngc3198) can be imported by id; add others via file upload.';
-        }
-        if (code === 'parse_error') {
-            return 'Import failed: the data could not be parsed. Check the file format.';
-        }
-        if (code === 'save_failed' || code === 'invalid_id') {
-            return (body && body.error) ? body.error : 'Import failed.';
-        }
-        return (body && body.error) ? body.error : 'Import failed.';
-    }
-
-    function getAvailableGalaxies() {
-        var importedSet = {};
-        sparcCatalog.already_imported.forEach(function (id) { importedSet[id] = true; });
-        var importableSet = {};
-        (sparcCatalog.importable_ids || []).forEach(function (id) { importableSet[id] = true; });
-        return sparcCatalog.galaxies.filter(function (g) {
-            return importableSet[g.id] && !importedSet[g.id];
-        });
-    }
-
-    function filterGalaxies(query) {
-        var available = getAvailableGalaxies();
-        if (!query) return available;
-        var q = query.toLowerCase();
-        return available.filter(function (g) {
-            return g.id && g.id.toLowerCase().indexOf(q) >= 0;
-        });
-    }
-
-    function renderList(galaxies) {
-        listEl.innerHTML = '';
-        if (galaxies.length === 0) {
-            emptyEl.style.display = 'block';
-            emptyEl.textContent = searchInput.value.trim()
-                ? 'No galaxies match your search.'
-                : 'No galaxies available for import. Add SPARC data files to enable import by id.';
-            listEl.style.display = 'none';
-            return;
-        }
-        emptyEl.style.display = 'none';
-        listEl.style.display = 'block';
-        galaxies.forEach(function (g) {
-            var li = document.createElement('li');
-            li.setAttribute('role', 'option');
-            li.setAttribute('aria-selected', g.id === selectedId ? 'true' : 'false');
-            li.className = 'sparc-import-item' + (g.id === selectedId ? ' selected' : '');
-            li.dataset.id = g.id;
-            li.setAttribute('tabindex', '0');
-            var idSpan = document.createElement('span');
-            idSpan.className = 'sparc-item-id';
-            idSpan.textContent = g.id;
-            li.appendChild(idSpan);
-            li.addEventListener('click', function () {
-                selectedId = g.id;
-                listEl.querySelectorAll('.sparc-import-item').forEach(function (item) {
-                    item.classList.toggle('selected', item.dataset.id === selectedId);
-                    item.setAttribute('aria-selected', item.dataset.id === selectedId ? 'true' : 'false');
-                });
-                importBtn.disabled = false;
-            });
-            listEl.appendChild(li);
-        });
-    }
-
-    function openOverlay() {
-        overlay.style.display = 'flex';
-        selectedId = null;
-        importBtn.disabled = true;
-        hideMessage();
-        searchInput.value = '';
-        loadingEl.style.display = 'block';
-        listEl.style.display = 'none';
-        emptyEl.style.display = 'none';
-        fetch('/api/sparc/catalog')
-            .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
-            .then(function (data) {
-                loadingEl.style.display = 'none';
-                sparcCatalog.galaxies = data.galaxies || [];
-                sparcCatalog.already_imported = data.already_imported || [];
-                sparcCatalog.importable_ids = data.importable_ids || [];
-                renderList(getAvailableGalaxies());
-            })
-            .catch(function () {
-                loadingEl.style.display = 'none';
-                showMessage('Catalog unavailable.', true);
-            });
-        searchInput.focus();
-    }
-
-    function closeOverlay() {
-        overlay.style.display = 'none';
-        if (openBtn) openBtn.focus();
-    }
-
-    function doImport() {
-        if (!selectedId) return;
-        importBtn.disabled = true;
-        if (listWrap) listWrap.setAttribute('aria-busy', 'true');
-        hideMessage();
-        showMessage('Downloading data...', false, true);
-        var progressTimer = setTimeout(function () {
-            showMessage('Processing data...', false, true);
-        }, 500);
-        fetch('/api/sparc/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ galaxy_id: selectedId })
-        })
-            .then(function (r) { return r.json().then(function (body) { return { ok: r.ok, status: r.status, body: body }; }); })
-            .then(function (res) {
-                clearTimeout(progressTimer);
-                if (res.ok) {
-                    if (listWrap) listWrap.removeAttribute('aria-busy');
-                    showMessage('Import successful. Galaxy has been added to your list.', false);
-                    fetchGalaxies().then(function (cat) {
-                        galaxyCatalog = cat;
-                        updateExamplesDropdown();
-                        var idx = (galaxyCatalog.prediction || []).findIndex(function (g) { return g.id === selectedId; });
-                        if (idx >= 0) {
-                            var dropdown = document.getElementById('examples-dropdown');
-                            if (dropdown) { dropdown.value = String(idx + 1); loadExample(); }
-                        }
-                    }).catch(function () { updateExamplesDropdown(); });
-                    setTimeout(closeOverlay, 1200);
-                } else {
-                    if (listWrap) listWrap.removeAttribute('aria-busy');
-                    showMessage(messageForError(res.body), true);
-                    importBtn.disabled = false;
-                }
-            })
-            .catch(function () {
-                clearTimeout(progressTimer);
-                if (listWrap) listWrap.removeAttribute('aria-busy');
-                showMessage('Import failed: network error. Try again.', true);
-                importBtn.disabled = false;
-            });
-    }
-
-    if (openBtn) openBtn.addEventListener('click', openOverlay);
-    if (closeBtn) closeBtn.addEventListener('click', closeOverlay);
-    if (closeBtn2) closeBtn2.addEventListener('click', closeOverlay);
-    if (searchInput) {
-        searchInput.addEventListener('input', function () {
-            renderList(filterGalaxies(searchInput.value.trim()));
-        });
-    }
-    if (importBtn) importBtn.addEventListener('click', doImport);
-
-    overlay.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') { e.preventDefault(); closeOverlay(); }
-        if (e.key === 'Tab') {
-            var focusable = overlay.querySelectorAll(focusableSelector);
-            var idx = Array.prototype.indexOf.call(focusable, document.activeElement);
-            if (e.shiftKey) {
-                if (idx <= 0) { e.preventDefault(); focusable[focusable.length - 1].focus(); }
-            } else {
-                if (idx === focusable.length - 1 || idx < 0) { e.preventDefault(); focusable[0].focus(); }
-            }
-        }
-    });
-}
-
 async function init() {
     await waitForLibraries();
 
-    // Initialize UI components before data loads
-    initViewModeToggle();
     initRightPanelTabs();
     initObsTabs();
-    initVortexChipListeners();
     initObsFontControls();
     initTheoryToggles();
     initCrosshairReadout();
-    initSparcImportOverlay();
+    initGalaxyBrowserSearch();
 
     try {
-        galaxyCatalog = await fetchGalaxies();
+        galaxyCatalog = await fetchGalaxyCatalog();
     } catch (err) {
         console.error('Failed to load galaxy catalog:', err);
-        // Fallback: empty catalog
-        galaxyCatalog = { prediction: [], inference: [] };
+        galaxyCatalog = [];
     }
 
-    updateExamplesDropdown();
+    renderGalaxyBrowser();
 
-    // Auto-load Milky Way so the chart is never empty on first visit
-    const dropdown = document.getElementById('examples-dropdown');
-    if (dropdown.options.length > 1) {
-        dropdown.value = '1';
-        loadExample();
+    if (galaxyCatalog.length > 0) {
+        await selectGalaxyById(galaxyCatalog[0].id);
     } else {
         updateDisplays();
-        updateChart();
     }
 
     dismissSplash();
 }
 
-// Expose functions to global scope for onclick handlers
-window.loadExample = loadExample;
-window.runAutoFit = runAutoFit;
-window.enterObservationMode = enterObservationMode;
-window.enterMassModelMode = enterMassModelMode;
+// =====================================================================
+// WINDOW EXPORTS
+// =====================================================================
+
+window.selectGalaxyById = selectGalaxyById;
+window.toggleMetricsSection = toggleMetricsSection;
+window.toggleMetricsPanel = toggleMetricsPanel;
+window.toggleChartDataSection = toggleChartDataSection;
+window.downloadChartDataJSON = downloadChartDataJSON;
+window.downloadCSV = downloadCSV;
+window.tableToCSV = tableToCSV;
+window.copyTableCSV = copyTableCSV;
 
 init();

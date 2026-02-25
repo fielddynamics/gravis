@@ -453,31 +453,7 @@ PREDICTION_GALAXIES = [
             "Corbelli 2014 A&A (VLA+GBT)",
         ],
     },
-    {
-        "id": "m33_vortex",
-        "name": "M33 Vortex (M_disk=1.3e11 M_sun, R_d=4.14 kpc)",
-        "distance": 20,
-        "galactic_radius": 45,
-        "mass": 11.114,
-        "accel": 1.0,
-        "mass_model": {
-            "bulge": {"M": 0, "a": 0.2},
-            "disk":  {"M": 1.30e11, "Rd": 4.14},
-            "gas":   {"M": 0, "Rd": 4.0},
-        },
-        "observations": [
-            {"r": 8.0, "v": 250.0, "err": 12},
-            {"r": 12.0, "v": 260.0, "err": 8},
-            {"r": 15.0, "v": 260.0, "err": 8},
-            {"r": 20.0, "v": 245.0, "err": 10},
-            {"r": 25.0, "v": 230.0, "err": 12},
-            {"r": 30.0, "v": 235.0, "err": 12},
-            {"r": 35.0, "v": 250.0, "err": 15},
-        ],
-        "references": [
-            "M33 vortex plot: GFD forward (M_disk, R_d) single exponential disk",
-        ],
-    },
+   
     # === SPARC SPIRALS with well-measured HI radii (Lelli+2016) ===
     # R_HI = HI radius at 1 M_sun/pc^2 column density (SPARC Table 1).
     # galactic_radius (R_env) set to ~1.15 * R_HI following existing catalog
@@ -1330,34 +1306,64 @@ def _sparc_dir():
     return os.path.join(os.path.dirname(__file__), "..", "sparc")
 
 
-def _load_sparc_galaxy_by_id(galaxy_id):
-    """Load a single galaxy from sparc/<galaxy_id>.json if present. Returns dict or None."""
-    if not galaxy_id or "/" in galaxy_id or "\\" in galaxy_id:
-        return None
-    path = os.path.join(_sparc_dir(), galaxy_id + ".json")
-    if not os.path.isfile(path):
-        return None
+# ---------------------------------------------------------------------------
+# In-memory cache: loaded once per process, avoids re-reading 176 JSON files
+# on every API request.  Call _invalidate_cache() in tests if needed.
+# ---------------------------------------------------------------------------
+
+_REQUIRED_FIELDS = (
+    "id", "name", "distance", "galactic_radius", "mass",
+    "accel", "mass_model", "observations", "references",
+)
+
+_cache = {
+    "catalog": None,      # list of {id, name} from sparc/catalog.json
+    "galaxies": None,     # list of full galaxy dicts from sparc/*.json
+    "by_id": None,        # dict mapping id -> galaxy dict (sparc + hardcoded)
+}
+
+
+def _invalidate_cache():
+    """Reset cache (useful for tests or after new imports)."""
+    _cache["catalog"] = None
+    _cache["galaxies"] = None
+    _cache["by_id"] = None
+
+
+def _ensure_catalog_loaded():
+    """Load sparc/catalog.json into cache if not already loaded."""
+    if _cache["catalog"] is not None:
+        return
+    catalog_path = os.path.join(_sparc_dir(), "catalog.json")
+    if not os.path.isfile(catalog_path):
+        _cache["catalog"] = []
+        return
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            g = json.load(f)
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, list):
+            _cache["catalog"] = [
+                e for e in raw
+                if isinstance(e, dict) and e.get("id") and e.get("name")
+            ]
+        else:
+            _cache["catalog"] = []
     except (json.JSONDecodeError, OSError):
-        return None
-    if not isinstance(g, dict):
-        return None
-    required = ("id", "name", "distance", "galactic_radius", "mass", "accel", "mass_model", "observations", "references")
-    if not all(g.get(k) is not None for k in required):
-        return None
-    return g
+        _cache["catalog"] = []
 
 
-def _load_sparc_galaxies():
-    """Load galaxy JSON files from sparc/ folder. Returns sorted list by id."""
+def _ensure_galaxies_loaded():
+    """Load all sparc/*.json into cache if not already loaded."""
+    if _cache["galaxies"] is not None:
+        return
     sparc_dir = _sparc_dir()
     if not os.path.isdir(sparc_dir):
-        return []
+        _cache["galaxies"] = []
+        _cache["by_id"] = {}
+        return
     result = []
     for fname in os.listdir(sparc_dir):
-        if not fname.endswith(".json"):
+        if not fname.endswith(".json") or fname == "catalog.json":
             continue
         path = os.path.join(sparc_dir, fname)
         if not os.path.isfile(path):
@@ -1367,21 +1373,56 @@ def _load_sparc_galaxies():
                 g = json.load(f)
             if not isinstance(g, dict):
                 continue
-            required = ("id", "name", "distance", "galactic_radius", "mass", "accel", "mass_model", "observations", "references")
-            if not all(g.get(k) is not None for k in required):
+            if not all(g.get(k) is not None for k in _REQUIRED_FIELDS):
                 continue
             result.append(g)
         except (json.JSONDecodeError, OSError):
             continue
     result.sort(key=lambda x: (x.get("id") or ""))
-    return result
+    _cache["galaxies"] = result
+    by_id = {}
+    for g in result:
+        by_id[g["id"]] = g
+    for g in PREDICTION_GALAXIES:
+        if g["id"] not in by_id:
+            by_id[g["id"]] = g
+    for g in INFERENCE_GALAXIES:
+        if g["id"] not in by_id:
+            by_id[g["id"]] = g
+    _cache["by_id"] = by_id
+
+
+def _load_sparc_galaxies():
+    """Return cached list of all galaxies from sparc/ folder (sorted by id)."""
+    _ensure_galaxies_loaded()
+    return _cache["galaxies"]
+
+
+def _load_sparc_galaxy_by_id(galaxy_id):
+    """Load a single galaxy from sparc/<galaxy_id>.json if present. Returns dict or None."""
+    if not galaxy_id or "/" in galaxy_id or "\\" in galaxy_id:
+        return None
+    _ensure_galaxies_loaded()
+    return _cache["by_id"].get(galaxy_id)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def get_galaxy_catalog():
+    """Return lightweight list of {id, name} for every galaxy in sparc/.
+
+    Reads from sparc/catalog.json (built by data/import_all_sparc.py).
+    Fast: no full galaxy data is loaded.
+    """
+    _ensure_catalog_loaded()
+    return list(_cache["catalog"])
 
 
 def get_prediction_galaxies():
-    """Return all prediction-mode galaxies (with mass models + observations)."""
-    base = PREDICTION_GALAXIES + SIMPLE_PREDICTION_GALAXIES
-    sparc = _load_sparc_galaxies()
-    return base + sparc
+    """Return all prediction-mode galaxies from sparc/ (cached)."""
+    return list(_load_sparc_galaxies())
 
 
 def get_inference_galaxies():
@@ -1390,11 +1431,12 @@ def get_inference_galaxies():
 
 
 def get_galaxy_by_id(galaxy_id):
-    """Look up a galaxy by its unique id: built-in catalog first, then sparc/<id>.json."""
-    for g in get_prediction_galaxies() + INFERENCE_GALAXIES:
-        if g["id"] == galaxy_id:
-            return g
-    return _load_sparc_galaxy_by_id(galaxy_id)
+    """Look up a galaxy by id. Checks sparc/ cache first, then hardcoded lists."""
+    _ensure_galaxies_loaded()
+    g = _cache["by_id"].get(galaxy_id)
+    if g is not None:
+        return g
+    return None
 
 
 def get_all_galaxies():

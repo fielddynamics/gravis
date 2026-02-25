@@ -87,6 +87,16 @@ def gfd_velocity_curve_sst(radii_kpc, M_enc_at_r, a0_eff):
     return [gfd_velocity_sst(r, M_enc_at_r(r), a0_eff) for r in radii_kpc]
 
 
+def gfd_velocity_sst_eq(r_kpc, m_solar, accel_ratio=1.0):
+    """
+    Engine-compatible equation: (r_kpc, m_solar, **params) -> (v_km_s, intermediates).
+    Same physics as gfd_velocity_sst; used so SST+Poisson is a stage like newtonian, mond, cdm.
+    """
+    a0_eff = A0 * accel_ratio
+    v = gfd_velocity_sst(r_kpc, m_solar, a0_eff)
+    return v, {}
+
+
 # ---------------------------------------------------------------------------
 # Field velocity from observations: inverse at obs points -> smooth M(r) -> forward only.
 # Per gfd_field_velocity_nails_it: no defraction on velocity. M(r) -> Eq75 -> SST -> v is pure algebra.

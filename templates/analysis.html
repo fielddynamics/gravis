@@ -39,45 +39,18 @@
                         <input type="range" id="mass-slider" min="8" max="13" step="0.1" value="11">
                     </div>
 
-                    <!-- Observations Panel -->
-                    <div class="observations-panel">
-                        <div class="observations-panel-header">
-                            <span class="observations-panel-label">Observations</span>
+                    <!-- Galaxy Browser -->
+                    <div class="galaxy-browser" id="galaxy-browser">
+                        <div class="galaxy-browser-header">
+                            <span class="galaxy-browser-label">Galaxies</span>
+                            <span class="galaxy-browser-count" id="galaxy-browser-count"></span>
                         </div>
-                        <div class="observations-panel-body">
-                            <select class="observations-dropdown" id="examples-dropdown" onchange="loadExample()">
-                            </select>
-                            <button type="button" class="add-observation-btn add-from-sparc-btn" id="add-from-sparc-btn" title="Import a galaxy from the SPARC catalog">
-                                + Add from SPARC
-                            </button>
-                            <button type="button" class="add-observation-btn add-other-observation-btn" disabled title="Coming soon">
-                                Add observation (other source)
-                            </button>
+                        <div class="galaxy-browser-search-wrap">
+                            <input type="text" id="galaxy-search-input" class="galaxy-search-input" placeholder="Filter galaxies..." autocomplete="off" spellcheck="false">
                         </div>
-                    </div>
-
-                    <!-- SPARC Import Overlay -->
-                    <div id="sparc-import-overlay" class="sparc-import-overlay" role="dialog" aria-modal="true" aria-labelledby="sparc-import-title" style="display: none;">
-                        <div class="sparc-import-container">
-                            <div class="sparc-import-header">
-                                <h2 id="sparc-import-title">Add observation from SPARC</h2>
-                                <button type="button" class="sparc-import-close" id="sparc-import-close" aria-label="Close">&times;</button>
-                            </div>
-                            <div class="sparc-import-toolbar">
-                                <label for="sparc-search-input" class="visually-hidden">Search by galaxy id</label>
-                                <input type="text" id="sparc-search-input" class="sparc-import-search" placeholder="Search by galaxy id (e.g. ngc3198)" aria-label="Search by galaxy id" autocomplete="off">
-                            </div>
-                            <p class="sparc-import-list-label" id="sparc-import-list-label">Select a galaxy to import</p>
-                            <div class="sparc-import-list-wrap">
-                                <div id="sparc-import-loading" class="sparc-import-loading" style="display: none;">Loading catalog...</div>
-                                <ul id="sparc-import-list" class="sparc-import-list" role="listbox" aria-label="Galaxies available for import"></ul>
-                                <div id="sparc-import-empty" class="sparc-import-empty" style="display: none;">No galaxies match your search.</div>
-                            </div>
-                            <div class="sparc-import-actions">
-                                <div id="sparc-import-message" class="sparc-import-message" role="alert" aria-live="polite" style="display: none;"></div>
-                                <button type="button" class="sparc-import-btn" id="sparc-import-btn" disabled>Import</button>
-                                <button type="button" class="sparc-import-close-btn" id="sparc-import-close-btn">Close</button>
-                            </div>
+                        <div class="galaxy-browser-list-wrap" id="galaxy-browser-list-wrap">
+                            <ul class="galaxy-browser-list" id="galaxy-browser-list" role="listbox" aria-label="Galaxy catalog"></ul>
+                            <div class="galaxy-browser-empty" id="galaxy-browser-empty" style="display: none;">No matches</div>
                         </div>
                     </div>
 
@@ -300,8 +273,8 @@
                         <label class="theory-chip" data-series="gfd_sigma_old" style="--chip-color: #ff44dd; display: none;" title="(Legacy) GFD Sigma from slow Bayesian fit">
                             <input type="checkbox"> GFD Sigma (Bayesian)
                         </label>
-                        <label class="theory-chip" data-series="gfd_velocity" style="--chip-color: #aa44ff; display: none;" title="GFD (Velocity): 6.2% defraction (Gaussian kernel). Weighted average, not exact match to observational mean.">
-                            <input type="checkbox" checked> GFD (Velocity)
+                        <label class="theory-chip" data-series="gfd_velocity" style="--chip-color: #aa44ff; display: none;" title="GFD (SST+Poisson photometric): 6.2% defraction (Gaussian kernel). Weighted average, not exact match to observational mean.">
+                            <input type="checkbox" checked> GFD (SST+Poisson photometric)
                         </label>
                         <label class="theory-chip" data-series="gfd_sst_velocity_decode" style="--chip-color: #1E88E5;" title="GFD velocity decode (no mass input): observations to defraction smooth to field velocity">
                             <input type="checkbox" checked> GFD velocity decode
@@ -314,6 +287,9 @@
                         </label>
                         <label class="theory-chip" data-series="cdm" style="--chip-color: #ffffff;" title="Lambda CDM + NFW halo">
                             <input type="checkbox"> CDM
+                        </label>
+                        <label class="theory-chip" data-series="gfd_topological" style="--chip-color: #FF6D00;" title="GFD Topological (signed Burgers vortex)">
+                            <input type="checkbox" checked> GFD (Topological)
                         </label>
                         <!-- Hidden chips preserved for later reintroduction -->
                         <label class="theory-chip" data-series="gfd_symmetric" style="--chip-color: #00E5FF; display: none;">
@@ -358,26 +334,26 @@
                         <div id="vortex-message" class="vortex-message" style="display: none;"></div>
                         <div class="vortex-theory-toggles theory-toggles" id="vortex-theory-toggles">
                             <span class="theory-toggles-label">Plot</span>
-                            <label class="theory-chip" data-series="vortex_raw" style="--chip-color: #888888;" title="GFD velocity from raw observations">
-                                <input type="checkbox" checked> GFD (Velocity raw)
-                            </label>
-                            <label class="theory-chip" data-series="vortex_smooth" style="--chip-color: #aa44ff;" title="GFD velocity with 1.5% fractional variance">
-                                <input type="checkbox" checked> GFD (Velocity smooth)
-                            </label>
-                            <label class="theory-chip" data-series="vortex_decode" style="--chip-color: #1E88E5;" title="GFD velocity decode (no mass input): obs to field velocity">
-                                <input type="checkbox" checked> GFD velocity decode
-                            </label>
                             <label class="theory-chip" data-series="vortex_observed" style="--chip-color: #FFC107;" title="Published rotation curve measurements">
                                 <input type="checkbox" checked> Observed Data
                             </label>
                             <label class="theory-chip" data-series="vortex_gfd" style="--chip-color: #00E5A0;" title="GFD velocity curve from mass model">
                                 <input type="checkbox"> GFD (Photometric)
                             </label>
+                            <label class="theory-chip" data-series="vortex_smooth" style="--chip-color: #aa44ff;" title="GFD velocity with 1.5% fractional variance">
+                                <input type="checkbox" checked> GFD (SST+Poisson photometric)
+                            </label>
+                            <label class="theory-chip" data-series="vortex_decode" style="--chip-color: #1E88E5;" title="GFD velocity decode (no mass input): obs to field velocity">
+                                <input type="checkbox" checked> GFD velocity decode
+                            </label>
                             <label class="theory-chip" data-series="vortex_mond" style="--chip-color: #9966ff;" title="Classical MOND">
                                 <input type="checkbox"> MOND
                             </label>
                             <label class="theory-chip" data-series="vortex_cdm" style="--chip-color: #ffffff;" title="Lambda CDM + NFW halo">
                                 <input type="checkbox"> CDM
+                            </label>
+                            <label class="theory-chip" data-series="vortex_raw" style="--chip-color: #888888; display: none;" title="GFD velocity from raw observations">
+                                <input type="checkbox"> GFD (Velocity raw)
                             </label>
                         </div>
                         <div class="vortex-charts">
@@ -506,26 +482,22 @@
                     <div class="metrics-pane metrics-pane-bottom" id="metrics-pane-bottom">
                     <div class="metrics-section" id="metrics-fit-quality">
                         <div class="metrics-header" onclick="toggleMetricsSection(this)">
-                            <span class="metrics-header-text">Fit Quality</span>
+                            <span class="metrics-header-text">Fit Quality vs Observations</span>
                             <span class="metrics-chevron">&#9660;</span>
                         </div>
                         <div class="metrics-body">
-                            <div class="metrics-row">
-                                <span class="metrics-label">RMS</span>
-                                <span class="metrics-value" id="metric-rms">--</span>
-                            </div>
-                            <div class="metrics-row">
-                                <span class="metrics-label">Reduced &#967;&#178;</span>
-                                <span class="metrics-value" id="metric-chi2">--</span>
-                            </div>
-                            <div class="metrics-row">
-                                <span class="metrics-label">Within 1&#963;</span>
-                                <span class="metrics-value" id="metric-hits-1s">--</span>
-                            </div>
-                            <div class="metrics-row">
-                                <span class="metrics-label">Within 2&#963;</span>
-                                <span class="metrics-value" id="metric-hits-2s">--</span>
-                            </div>
+                            <table class="fit-compare-table" id="fit-compare-table">
+                                <thead>
+                                    <tr>
+                                        <th>Theory</th>
+                                        <th>RMS</th>
+                                        <th>&#967;&#178;<sub>r</sub></th>
+                                        <th>1&#963;</th>
+                                        <th>2&#963;</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fit-compare-tbody"></tbody>
+                            </table>
                         </div>
                     </div>
 
@@ -604,24 +576,47 @@
                         </div>
                     </div>
 
-                    <div class="metrics-section collapsed" id="metrics-residuals">
+                    <div class="metrics-section collapsed" id="metrics-residuals-photometric">
                         <div class="metrics-header" onclick="toggleMetricsSection(this)">
-                            <span class="metrics-header-text">Residuals</span>
+                            <span class="metrics-header-text">GFD (Photometric) Residuals</span>
                             <span class="metrics-chevron">&#9654;</span>
                         </div>
                         <div class="metrics-body" style="display: none;">
                             <div class="metrics-residuals-table-wrap">
-                                <table class="metrics-residuals-table" id="metrics-residuals-table">
+                                <table class="metrics-residuals-table" id="metrics-residuals-photometric-table">
                                     <thead>
                                         <tr>
                                             <th>r</th>
                                             <th>v<sub>obs</sub></th>
-                                            <th>v<sub>gfd</sub></th>
+                                            <th>v<sub>phot</sub></th>
                                             <th>&#916;v</th>
                                             <th>&#963;</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="metrics-residuals-tbody"></tbody>
+                                    <tbody id="metrics-residuals-photometric-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metrics-section collapsed" id="metrics-residuals-topological">
+                        <div class="metrics-header" onclick="toggleMetricsSection(this)">
+                            <span class="metrics-header-text">GFD (Topological) Residuals</span>
+                            <span class="metrics-chevron">&#9654;</span>
+                        </div>
+                        <div class="metrics-body" style="display: none;">
+                            <div class="metrics-residuals-table-wrap">
+                                <table class="metrics-residuals-table" id="metrics-residuals-topological-table">
+                                    <thead>
+                                        <tr>
+                                            <th>r</th>
+                                            <th>v<sub>obs</sub></th>
+                                            <th>v<sub>topo</sub></th>
+                                            <th>&#916;v</th>
+                                            <th>&#963;</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="metrics-residuals-topological-tbody"></tbody>
                                 </table>
                             </div>
                         </div>

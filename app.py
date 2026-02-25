@@ -32,8 +32,8 @@ from physics.services.sparc import SparcService
 def create_registry():
     """Build and populate the service registry."""
     registry = GravisRegistry()
-    registry.register(RotationService())
     registry.register(VortexService())
+    registry.register(RotationService(vortex_service=registry.get("vortex")))
     registry.register(RARService())
     registry.register(RedshiftService())
     registry.register(SolarService())

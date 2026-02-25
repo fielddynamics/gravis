@@ -1,0 +1,67 @@
+{
+  "id": "m31",
+  "name": "M31Andromeda",
+  "distance": 40,
+  "galactic_radius": 40,
+  "mass": 117600000000,
+  "accel": 1,
+  "mass_model": {
+    "bulge": {
+      "M": 30000000000,
+      "a": 1.0
+    },
+    "disk": {
+      "M": 77600000000,
+      "Rd": 5.5
+    },
+    "gas": {
+      "M": 10000000000,
+      "Rd": 12.0
+    }
+  },
+  "observations": [
+    {
+      "r": 8,
+      "v": 250,
+      "err": 12
+    },
+    {
+      "r": 12,
+      "v": 260,
+      "err": 8
+    },
+    {
+      "r": 15,
+      "v": 260,
+      "err": 8
+    },
+    {
+      "r": 20,
+      "v": 245,
+      "err": 10
+    },
+    {
+      "r": 25,
+      "v": 230,
+      "err": 12
+    },
+    {
+      "r": 30,
+      "v": 235,
+      "err": 12
+    },
+    {
+      "r": 35,
+      "v": 250,
+      "err": 15
+    }
+  ],
+  "references": [
+    "Tamm+2012 A&A 546 A4 (stellar mass)",
+    "Kent 1989 (bulge)",
+    "Barmby+2006 (3.6um photometry)",
+    "Braun+2009 ApJ 695 937 (HI gas)",
+    "Chemin+2009 ApJ 705 1395 (rotation curve)",
+    "Corbelli+2010 A&A 511 A89 (tilted ring model)"
+  ]
+}

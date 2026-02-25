@@ -188,10 +188,17 @@ def method_1_figure_a(galaxy_id, variance_pct=0.0):
         v_field_pos = np.array([], dtype=float)
         v_fv_on_raw = np.full_like(radii_fine, np.nan)
 
-    # Show GFD curve over full symmetric range (match Python vortex plot: red line full -R to +R)
+    # GFD (SST+Poisson photometric): full curve from mass model (disk+bulge+gas). No bridge: tiny gap at origin (~2%).
     v_fv_display = np.where(np.isfinite(v_fv_on_raw), v_fv_on_raw, np.nan)
+    GFD_FV_GAP_R_KPC = 0.02
+    gap_mask_fv = np.abs(radii_fine) < GFD_FV_GAP_R_KPC
+    v_fv_display = np.where(gap_mask_fv, np.nan, v_fv_display)
 
     # GFD velocity decode (no mass input): obs -> defraction -> field velocity. Same as observational chart.
+    # Clip to observation range: only show decode between first and last observation radius (and mirror).
+    # Do not bridge mirror (r < 0) and real (r > 0): tiny gap at origin (~2%).
+    GFD_DECODE_GAP_R_KPC = 0.02
+    r_min_obs = float(np.min(obs_r))
     v_decode_display = np.full_like(radii_fine, np.nan)
     if len(obs_r) >= 2:
         radii_decode = radii_pos[radii_pos >= GFD_MIN_R_KPC]
@@ -205,6 +212,15 @@ def method_1_figure_a(galaxy_id, variance_pct=0.0):
                     r_abs < GFD_MIN_R_KPC, v_at_min_d,
                     np.interp(r_abs, radii_decode, v_decode_pos))
                 v_decode_display = np.where(np.isfinite(v_decode_on_full), v_decode_on_full, np.nan)
+                # Gap at origin: no bridge between mirror and real. Set NaN for |r| < GFD_DECODE_GAP_R_KPC.
+                gap_mask = np.abs(radii_fine) < GFD_DECODE_GAP_R_KPC
+                v_decode_display = np.where(gap_mask, np.nan, v_decode_display)
+                # Clip to observation range: real side r_min_obs <= r <= r_max_obs; mirror side -r_max_obs <= r <= -r_min_obs.
+                out_of_range = (
+                    (radii_fine > 0) & ((radii_fine < r_min_obs) | (radii_fine > r_max_obs))
+                    | (radii_fine < 0) & ((radii_fine < -r_max_obs) | (radii_fine > -r_min_obs))
+                )
+                v_decode_display = np.where(out_of_range, np.nan, v_decode_display)
 
     def _safe_vlist(arr):
         return [float(x) if np.isfinite(x) else None for x in np.asarray(arr)]
@@ -308,6 +324,14 @@ class VortexService(GravisService):
         if variance_pct < 0:
             variance_pct = 0.0
         return {"galaxy_id": galaxy_id.strip().lower(), "variance_pct": variance_pct}
+
+    def figure_a(self, galaxy_id, variance_pct=0.0):
+        """Return Figure A data (velocity curves). Same as method_1_figure_a. Used by RotationService charts."""
+        return method_1_figure_a(galaxy_id, variance_pct)
+
+    def figure_b(self, galaxy_id, variance_pct=0.0):
+        """Return Figure B data (transformation). Same as method_2_figure_b. Used by RotationService charts."""
+        return method_2_figure_b(galaxy_id, variance_pct)
 
     def compute(self, config):
         """Not used; we expose figure-a and figure-b via register_routes."""

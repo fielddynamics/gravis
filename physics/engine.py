@@ -307,10 +307,12 @@ class GravisResult:
         api_key_map = {
             "newtonian": "newtonian",
             "gfd": "dtg",
+            "gfd_velocity": "gfd_velocity",
             "gfd_structure": "gfd_structure",
             "gfd_symmetric": "gfd_symmetric",
             "mond": "mond",
             "cdm": "cdm",
+            "gfd_topological": "gfd_topological",
         }
 
         for stage_name, result in self.stage_results.items():
@@ -693,6 +695,7 @@ class GravisEngine:
             mond_eq,
             cdm_eq,
         )
+        from physics.sst_topological_velocity import gfd_velocity_sst_eq
 
         engine = cls(config)
 
@@ -717,6 +720,13 @@ class GravisEngine:
             name="gfd",
             equation=gfd_eq,
             equation_label="x^2/(1+x) = g_N/a0, v = sqrt(a0 * x * r)",
+            parameters={"accel_ratio": config.accel_ratio},
+        ))
+
+        engine.add_stage(GravisStage(
+            name="gfd_velocity",
+            equation=gfd_velocity_sst_eq,
+            equation_label="g_source=(17/13)*G*M/r^2, g_total=sqrt(g_source*a0+g_source^2), v=sqrt(r*g_total)",
             parameters={"accel_ratio": config.accel_ratio},
         ))
 
@@ -773,6 +783,24 @@ class GravisEngine:
             equation_label="v = sqrt(v_baryon^2 + v_NFW^2)",
             parameters={"m200": m200 or 0.0},
         ))
+
+        # GFD Topological: signed Burgers vortex (requires observations)
+        observations = config.observations
+        if observations and len(observations) >= 3:
+            from physics.topological import GfdTopologicalStage
+            engine.add_stage(GfdTopologicalStage(
+                name="gfd_topological",
+                equation_label=(
+                    "Phase1: classify interior (absorbing/pumping/quiet), "
+                    "Phase2: signed Burgers vortex fit, "
+                    "v = sqrt(g_total * r)"
+                ),
+                parameters={
+                    "accel_ratio": config.accel_ratio,
+                    "observations": observations,
+                    "mass_model": config.mass_model,
+                },
+            ))
 
         return engine
 

@@ -86,6 +86,52 @@ def nfw_enclosed_mass(r_kpc, m200_solar):
     return max(m_enc, 0.0)
 
 
+def m200_from_nfw_rho0_rs(rho0_kg_m3, rs_m):
+    """
+    Convert NFW (rho0, r_s) parameterization to virial mass M_200 in solar masses.
+
+    Solves for concentration c from rho0 and then M200 = (4*pi/3)*200*rho_crit*(c*rs)^3.
+    Used for literature NFW parameters (e.g. fig1_decoding_mass_from_rotation.py)
+    so the app CDM curve matches the letter figure for Milky Way and M33.
+
+    Parameters
+    ----------
+    rho0_kg_m3 : float
+        NFW scale density in kg/m^3.
+    rs_m : float
+        NFW scale radius in meters.
+
+    Returns
+    -------
+    float
+        M_200 in solar masses.
+    """
+    if rho0_kg_m3 <= 0 or rs_m <= 0:
+        return 0.0
+    target = (200.0 * RHO_CRIT / 3.0) / rho0_kg_m3
+    if target <= 0:
+        return 0.0
+
+    def f_over_c3(c):
+        if c <= 0:
+            return 0.0
+        f = math.log(1.0 + c) - c / (1.0 + c)
+        return f / (c * c * c)
+
+    c_lo, c_hi = 0.1, 500.0
+    for _ in range(80):
+        c_mid = 0.5 * (c_lo + c_hi)
+        val = f_over_c3(c_mid)
+        if val < target:
+            c_hi = c_mid
+        else:
+            c_lo = c_mid
+    c = 0.5 * (c_lo + c_hi)
+    r200_m = c * rs_m
+    m200_kg = (4.0 * math.pi / 3.0) * 200.0 * RHO_CRIT * (r200_m ** 3)
+    return m200_kg / M_SUN
+
+
 def nfw_velocity(r_kpc, m200_solar):
     """
     NFW halo circular velocity at radius r in km/s.
@@ -136,6 +182,18 @@ def cdm_velocity(r_kpc, m_baryon_enclosed, m200_solar):
 
     v_total = math.sqrt(v2_baryon + v2_nfw) / 1000.0
     return v_total
+
+
+# ---------------------------------------------------------------------------
+# Literature NFW (rho0, r_s) for letter figure match: Milky Way and M33
+# From fig1_decoding_mass_from_rotation.py (Nelson 2026 letter).
+# ---------------------------------------------------------------------------
+
+LITERATURE_NFW_RHO0_RS = {
+    "milky_way": (1.826e-21, 9.3 * KPC_TO_M),   # kg/m^3, m
+    "m33": (2.924e-23, 101.5 * KPC_TO_M),
+    "ngc3198": (3.189e-22, 15.9 * KPC_TO_M),
+}
 
 
 # ---------------------------------------------------------------------------
